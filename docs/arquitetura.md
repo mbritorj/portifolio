@@ -12,6 +12,13 @@ src/escriba/
 │   ├── base.py        interface Transcriber
 │   ├── faster_whisper_engine.py
 │   └── mock.py        motor falso, para teste sem modelo
+├── diarize/
+│   ├── base.py        interface SpeakerEmbedder
+│   ├── sherpa_embedder.py  impressão vocal em ONNX
+│   ├── mock.py        extrator falso, para teste sem modelo
+│   ├── clustering.py  agrupamento incremental por cosseno
+│   └── profiles.py    cadastro de vozes (nome ↔ impressão vocal)
+├── attribution.py     nomes a partir do transcript oficial da plataforma
 ├── pipeline.py        threads de captura, fila de inferência, eventos
 ├── session.py         segmentos, hipóteses parciais, exportação
 ├── server.py          FastAPI + WebSocket
@@ -66,6 +73,54 @@ Detector por energia com piso de ruído adaptativo, sem modelo e sem biblioteca 
 Tudo isso é `numpy` puro, o que torna o comportamento testável com áudio sintético: veja
 `tests/test_vad.py`.
 
+## Diarização: das vozes aos nomes
+
+O problema se divide em dois, e só o primeiro é acústico.
+
+**Separar as vozes.** Como o VAD já entrega falas fechadas, não é preciso um
+pipeline de diarização completo: um vetor por fala e um agrupamento online dão
+conta. Cada falante é um centroide; a fala entra no centroide mais próximo se
+passar do limiar de cosseno, senão abre um falante novo. O centroide é uma média
+ponderada pela duração — uma fala de 20 s descreve melhor o timbre da pessoa do
+que um "sim" de meio segundo.
+
+Três decisões que o código materializa:
+
+* **Fala curta herda o falante anterior.** Abaixo de `min_audio_s` o vetor é
+  instável; inventar um "Falante 7" a partir de um "uhum" polui a transcrição
+  mais do que atribuir ao último que falou.
+* **Hipótese parcial não gera vetor.** Ela é refeita a cada ciclo; extrair
+  embedding de um trecho que ainda cresce custa caro e muda de resposta.
+* **Teto de falantes.** Atingido o limite, a fala vai para o mais parecido e o
+  escore baixo denuncia a incerteza — melhor do que multiplicar grupos fantasma.
+
+**Dar nome.** Nenhum modelo acústico produz "Ana Souza": nome vem de fora. São
+três fontes, e as três terminam no mesmo lugar (`Session.renomear_falante`):
+
+1. a pessoa renomeia na interface;
+2. a voz bate com um cadastro (`diarize/profiles.py`), e o nome sai já na
+   primeira fala;
+3. o transcript oficial da plataforma (`attribution.py`) nomeia tudo depois.
+
+A rota 3 alimenta a 2: os centroides ficam salvos no `.json` da transcrição, e
+`escriba nomear --cadastrar` os transforma em cadastro de voz. Assim a reunião
+seguinte já sai com nome ao vivo, sem ninguém gravar amostra.
+
+### Alinhamento de relógios
+
+O transcript da plataforma conta o tempo do início da reunião; o Escriba, do
+momento em que a captura começou. Em vez de pedir esse número, `estimar_offset`
+rasteriza as duas linhas do tempo em bins de 100 ms e acha o deslocamento de
+maior correlação cruzada (via FFT). É barato, não depende do texto e funciona
+mesmo quando a transcrição automática erra as palavras.
+
+### Renomear é fundir
+
+Renomear um falante para um nome que já existe funde os dois grupos: centroides
+combinados por duração, segmentos remapeados. Isso resolve o erro mais comum do
+agrupamento — a mesma pessoa partida em dois grupos — com a ação que a pessoa já
+ia fazer de qualquer jeito.
+
 ## Linha do tempo
 
 Cada trilha tem seu próprio relógio de áudio (blocos consumidos × duração do bloco).
@@ -86,5 +141,8 @@ não — o que mantém o pacote instalável sem scipy, ao custo de um filtro pio
 * **Outra fonte de áudio:** implemente `AudioSource.blocks()` devolvendo blocos mono
   float32 na taxa alvo. É assim que `WavFileSource` reaproveita todo o pipeline para
   transcrever gravações.
-* **Diarização:** o ponto de entrada é o `_transcrever` do pipeline, sobre o áudio da
-  fala fechada, antes de `session.add_segment`.
+* **Outro extrator de voz:** implemente `SpeakerEmbedder.embed` e registre em
+  `diarize/__init__.py`. O agrupamento é agnóstico à dimensão do vetor.
+* **Outro formato de transcript oficial:** acrescente um leitor em
+  `attribution.py` que devolva `list[Cue]`; o alinhamento e a renomeação não
+  mudam.

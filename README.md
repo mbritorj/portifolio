@@ -40,7 +40,7 @@ máquina de quem já está na reunião. Consequências práticas:
 | Precisa de permissão de TI | quase sempre | não, é áudio local |
 | Áudio sai da máquina | sim | não |
 | Grava reunião de terceiros que você não está | sim | não |
-| Distingue cada pessoa pelo nome | às vezes | não (veja [Limitações](#limitações-conhecidas)) |
+| Distingue cada pessoa pelo nome | às vezes | sim, por cadastro de voz ou pelo transcript oficial |
 
 As APIs oficiais das três plataformas **não** oferecem transcrição ao vivo sem bot —
 Teams, Webex e Meet entregam o transcript depois do fim da reunião. O levantamento está
@@ -60,7 +60,8 @@ em [`docs/plataformas.md`](docs/plataformas.md).
 git clone <este-repositório> && cd portifolio
 python -m venv .venv && source .venv/bin/activate   # Windows: .venv\Scripts\activate
 pip install -e ".[local,web]"                        # transcrição local + interface web
-pip install -e ".[local,web,ata]"                    # com ata pela Claude API
+pip install -e ".[local,web,diarizacao]"             # com separação de vozes
+pip install -e ".[local,web,diarizacao,ata]"         # com ata pela Claude API
 ```
 
 No Windows, some `[windows]` para o loopback nativo:
@@ -168,6 +169,88 @@ o texto já transcrito — nunca o áudio.
 
 ---
 
+## Quem falou o quê
+
+Sem bot na sala, não existe uma trilha por participante: o loopback entrega a
+mistura pronta. O Escriba resolve isso em três camadas, e você pode parar em
+qualquer uma delas.
+
+### 1. Separar as vozes
+
+Cada fala fechada vira um vetor de voz, e vetores parecidos caem no mesmo grupo.
+Precisa de um modelo de embedding de falante (~28 MB, baixado uma vez):
+
+```bash
+mkdir -p modelos && cd modelos
+curl -LO https://github.com/k2-fsa/sherpa-onnx/releases/download/speaker-recongition-models/3dspeaker_speech_campplus_sv_zh_en_16k-common_advanced.onnx
+cd ..
+
+escriba --diarizar --modelo-voz modelos/3dspeaker_*.onnx servir
+```
+
+A transcrição passa a sair como "Falante 1", "Falante 2", cada um com sua cor. Na
+interface, clicar em **renomear** troca o nome em toda a transcrição — e renomear
+um falante para um nome que já existe funde os dois, que é como você diz "isto
+aqui é a mesma pessoa".
+
+Modelos de verificação de locutor separam vozes, não idiomas: o modelo sugerido
+foi treinado em inglês e mandarim e funciona em português. O que degrada o
+resultado é a qualidade do áudio, não a língua.
+
+### 2. Cadastrar a voz de quem se repete
+
+Quem foi cadastrado aparece com o nome já na primeira fala, ao vivo:
+
+```bash
+escriba vozes cadastrar "Ana Souza" --audio ana.wav   # 20 a 30 s bastam
+escriba vozes listar
+escriba vozes remover "Ana Souza"
+```
+
+Depois de uma reunião, dá para cadastrar sem gravar amostra nenhuma: renomeie o
+falante na interface e clique em **cadastrar voz** — o que é guardado é o
+centroide já calculado, não o áudio.
+
+### 3. Usar o transcript oficial da plataforma
+
+Teams, Webex e Meet entregam, depois da reunião, um transcript **com os nomes**.
+Ele não serve ao vivo, mas serve de gabarito:
+
+```bash
+escriba nomear transcricoes/2026-09-05_1430_kickoff.json \
+        --transcript ~/Downloads/teams.vtt --cadastrar
+```
+
+O comando descobre sozinho a defasagem entre os dois relógios (a gravação quase
+nunca começa junto com a reunião), casa cada voz agrupada com quem mais falou
+naquele intervalo, renomeia a transcrição inteira e — com `--cadastrar` — usa os
+centroides para alimentar o cadastro de vozes. Na próxima reunião, os mesmos
+nomes aparecem ao vivo, sem ninguém ter gravado amostra.
+
+Aceita WebVTT, SRT e texto no padrão `[00:00:04] Nome: fala`. Use `--simular`
+para ver as propostas e a confiança de cada uma antes de aplicar.
+
+### Sobre a impressão vocal e a LGPD
+
+O vetor de voz identifica uma pessoa, então é **dado pessoal sensível** (LGPD,
+art. 5º, II e art. 11). O Escriba trata isso assim:
+
+* agrupar vozes de forma anônima ("Falante 2") não cadastra nada;
+* cadastrar exige consentimento explícito — pela interface, uma confirmação; pela
+  linha de comando, responder à pergunta ou passar `--sim`;
+* o arquivo `vozes.json` fica na sua máquina, com a data do consentimento
+  registrada, e `escriba vozes remover` apaga;
+* o áudio nunca é guardado: o que fica é o vetor.
+
+### O que ainda não funciona
+
+Fala sobreposta. Quando duas pessoas falam ao mesmo tempo, a informação de
+separação já se perdeu na mistura antes de chegar ao seu computador — um bot
+recebe uma trilha por participante, você não. É o limite duro da arquitetura sem
+bot, e nenhuma das três camadas acima o contorna.
+
+---
+
 ## Configuração
 
 Copie `escriba.example.toml` para `escriba.toml` e ajuste o que precisar; tudo tem
@@ -233,10 +316,11 @@ Detalhamento em [`docs/arquitetura.md`](docs/arquitetura.md).
 
 Coisas que este projeto **não** faz, para você não descobrir no meio de uma reunião:
 
-* **Não distingue os participantes pelo nome.** A separação é por origem do áudio: você
-  de um lado, todos os outros do outro. Diarização por voz dentro da trilha remota é
-  possível (pyannote), mas custa GPU e latência, e continua rotulando "Falante 1" em vez
-  de "Ana" — está no roteiro, não no código.
+* **Não separa fala sobreposta.** Quando duas pessoas falam ao mesmo tempo, o loopback
+  já entrega a mistura: a informação para separá-las se perdeu antes de chegar aqui. É o
+  limite duro de não usar bot, e a diarização não o contorna.
+* **A separação de vozes é opcional e precisa de um modelo baixado à parte.** Sem ela, a
+  transcrição sai dividida apenas entre "Eu" e "Participantes".
 * **Não grava reunião em que você não está.** É consequência direta do modelo: sem bot,
   a captura depende de alguém presente na sala.
 * **Fone de ouvido ajuda muito.** Na caixa de som, sua voz volta pelo loopback e aparece
@@ -267,17 +351,26 @@ O que este projeto recomenda, e o que ele já faz por você:
 
 ```bash
 pip install -e ".[dev]"
-pytest          # 65 testes, sem hardware de áudio e sem baixar modelo
+pytest          # 130 testes, sem hardware de áudio e sem baixar modelo
 ruff check src tests
 ```
 
-A suíte roda com áudio sintético e um motor de transcrição falso (`--motor mock`), então
-ela exercita captura, VAD, fila de inferência, servidor e exportação em qualquer máquina,
-inclusive em CI sem placa de som.
+A suíte roda com áudio sintético, um motor de transcrição falso (`--motor mock`) e um
+extrator de voz falso, então ela exercita captura, VAD, fila de inferência, diarização,
+cadastro de vozes, servidor e exportação em qualquer máquina, inclusive em CI sem placa
+de som. Para exercitar o extrator real, aponte `ESCRIBA_TEST_MODEL` para um `.onnx`:
+
+```bash
+ESCRIBA_TEST_MODEL=modelos/3dspeaker_campplus.onnx pytest -k sherpa
+```
 
 ## Roteiro
 
-- [ ] Diarização opcional dentro da trilha remota (pyannote), atrás de uma flag
+- [x] Diarização opcional dentro da trilha remota, atrás de uma flag
+- [x] Cadastro de voz, para nomear ao vivo quem se repete nas reuniões
+- [x] Atribuição de nomes pelo transcript oficial da plataforma
+- [ ] Buscar o transcript oficial pela API (Graph, Webex, Meet) em vez do arquivo baixado
+- [ ] Falante ativo lido da interface da plataforma, por acessibilidade
 - [ ] Cancelamento de eco entre microfone e loopback, para quem usa caixa de som
 - [ ] Glossário por reunião, aplicado como correção posterior além do `initial_prompt`
 - [ ] Motor alternativo com WhisperX, para alinhamento por palavra mais preciso

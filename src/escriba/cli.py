@@ -25,6 +25,11 @@ def construir_parser() -> argparse.ArgumentParser:
     parser.add_argument("--config", help="arquivo TOML de configuração")
     parser.add_argument("--motor", help="motor de transcrição (faster-whisper, mock)")
     parser.add_argument("--modelo", help="modelo Whisper (tiny, base, small, medium, large-v3)")
+    parser.add_argument(
+        "--diarizar", action="store_true",
+        help="separa as vozes dos participantes remotos (precisa de --modelo-voz)",
+    )
+    parser.add_argument("--modelo-voz", help="caminho do .onnx de embedding de falante")
     parser.add_argument("-v", "--verboso", action="store_true", help="log detalhado")
     sub = parser.add_subparsers(dest="comando", required=True)
 
@@ -52,6 +57,45 @@ def construir_parser() -> argparse.ArgumentParser:
     ata.add_argument("--instrucoes", help="orientação extra para a ata")
     ata.add_argument("--saida", help="arquivo .md de destino (padrão: ao lado do .json)")
 
+    vozes = sub.add_parser("vozes", help="cadastro de vozes (nome automático dos falantes)")
+    acao = vozes.add_subparsers(dest="acao", required=True)
+    acao.add_parser("listar", help="mostra as vozes cadastradas")
+    cadastrar = acao.add_parser("cadastrar", help="cadastra a voz de uma pessoa")
+    cadastrar.add_argument("nome", help="nome da pessoa")
+    cadastrar.add_argument("--audio", required=True, help="WAV com a voz dela (20 a 30 s bastam)")
+    cadastrar.add_argument(
+        "--sim", action="store_true", help="confirma o consentimento sem perguntar"
+    )
+    remover = acao.add_parser("remover", help="apaga uma voz cadastrada")
+    remover.add_argument("nome", help="nome ou identificador do cadastro")
+
+    nomear = sub.add_parser(
+        "nomear", help="dá nome às vozes usando o transcript oficial da plataforma"
+    )
+    nomear.add_argument("caminho", help="arquivo .json exportado pelo Escriba")
+    nomear.add_argument(
+        "--transcript", required=True,
+        help="transcript da plataforma (.vtt, .srt ou texto com hora e nome)",
+    )
+    nomear.add_argument(
+        "--offset", type=float,
+        help="defasagem em segundos entre os dois relógios (o padrão é descobrir sozinho)",
+    )
+    nomear.add_argument(
+        "--min-confianca", type=float, default=0.5,
+        help="fração mínima de sobreposição para aceitar um nome (padrão 0.5)",
+    )
+    nomear.add_argument(
+        "--simular", action="store_true", help="mostra as propostas sem alterar nada"
+    )
+    nomear.add_argument(
+        "--cadastrar", action="store_true",
+        help="cadastra as vozes identificadas, para a próxima reunião já sair com nome",
+    )
+    nomear.add_argument(
+        "--sim", action="store_true", help="confirma o consentimento sem perguntar"
+    )
+
     sub.add_parser(
         "autoteste",
         help="valida o pipeline com áudio sintético, sem modelo nem microfone",
@@ -71,6 +115,10 @@ def main(argv: list[str] | None = None) -> int:
         config.asr.engine = args.motor
     if args.modelo:
         config.asr.model = args.modelo
+    if args.modelo_voz:
+        config.diarizacao.model = args.modelo_voz
+    if args.diarizar:
+        config.diarizacao.enabled = True
 
     acoes = {
         "dispositivos": _cmd_dispositivos,
@@ -78,6 +126,8 @@ def main(argv: list[str] | None = None) -> int:
         "servir": _cmd_servir,
         "arquivo": _cmd_arquivo,
         "ata": _cmd_ata,
+        "vozes": _cmd_vozes,
+        "nomear": _cmd_nomear,
         "autoteste": _cmd_autoteste,
     }
     try:
@@ -230,6 +280,191 @@ def _cmd_ata(config: AppConfig, args) -> int:
         f"{resumo.tokens_saida} de saída]\nSalvo em: {destino}"
     )
     return 0
+
+
+def _cmd_vozes(config: AppConfig, args) -> int:
+    from .diarize import VoiceProfileStore
+    from .diarize.profiles import AVISO_LGPD
+
+    caminho = config.caminho_vozes()
+    store = VoiceProfileStore(caminho)
+
+    if args.acao == "listar":
+        if not len(store):
+            print(f"nenhuma voz cadastrada em {caminho}.")
+            return 0
+        print(f"Vozes cadastradas em {caminho}:\n")
+        for perfil in store.profiles:
+            print(
+                f"  {perfil.name}  [{perfil.profile_id}]  "
+                f"{perfil.samples} amostra(s), cadastrada em {perfil.created_at[:10]}"
+            )
+        return 0
+
+    if args.acao == "remover":
+        if store.remove(args.nome):
+            print(f"voz de {args.nome} removida.")
+            return 0
+        print(f"erro: {args.nome!r} não está cadastrado.", file=sys.stderr)
+        return 1
+
+    # cadastrar
+    origem = Path(args.audio)
+    if not origem.exists():
+        print(f"erro: {origem} não existe.", file=sys.stderr)
+        return 1
+    if not _confirmar(AVISO_LGPD, args.sim):
+        print("cadastro cancelado.")
+        return 1
+
+    try:
+        vetor = _impressao_vocal(config, origem)
+    except (RuntimeError, ValueError) as exc:
+        print(f"erro: {exc}", file=sys.stderr)
+        return 1
+
+    perfil = store.add(args.nome, vetor, consent=True, note=f"cadastrado de {origem.name}")
+    print(f"voz de {perfil.name} cadastrada em {caminho} ({perfil.samples} amostra(s)).")
+    return 0
+
+
+def _impressao_vocal(config: AppConfig, caminho: Path):
+    """Extrai o vetor da voz de um WAV, usando só os trechos com fala."""
+    import numpy as np
+
+    from .audio.capture import WavFileSource
+    from .audio.vad import EnergyVad
+    from .diarize import create_embedder
+
+    vad = EnergyVad(config.vad, config.audio.sample_rate, config.audio.block_ms)
+    falas = []
+    fonte = WavFileSource(
+        caminho, target_rate=config.audio.sample_rate, block_ms=config.audio.block_ms
+    )
+    for bloco in fonte.blocks():
+        falas += [u.audio for u in vad.process(bloco)]
+    restante = vad.flush()
+    if restante is not None:
+        falas.append(restante.audio)
+
+    if not falas:
+        raise ValueError(
+            f"não encontrei fala em {caminho.name}. Grave 20 a 30 segundos falando normalmente."
+        )
+    audio = np.concatenate(falas)
+    duracao = audio.size / config.audio.sample_rate
+    if duracao < 5:
+        print(f"aviso: só {duracao:.1f}s de fala; o cadastro fica mais firme com 20 a 30 s.")
+
+    embedder = create_embedder(config.diarizacao)
+    try:
+        return embedder.embed(audio, config.audio.sample_rate)
+    finally:
+        embedder.close()
+
+
+def _cmd_nomear(config: AppConfig, args) -> int:
+    from .attribution import TranscriptError, aplicar, ler_transcript, mapear
+    from .session import Session
+
+    origem, transcript = Path(args.caminho), Path(args.transcript)
+    for arquivo in (origem, transcript):
+        if not arquivo.exists():
+            print(f"erro: {arquivo} não existe.", file=sys.stderr)
+            return 1
+
+    session = Session.from_json(origem.read_text(encoding="utf-8"))
+    if not any(s.speaker_id for s in session.segments):
+        print(
+            "erro: esta transcrição não tem vozes separadas. Grave com --diarizar "
+            "para que haja o que nomear.",
+            file=sys.stderr,
+        )
+        return 1
+
+    try:
+        cues = ler_transcript(transcript)
+    except TranscriptError as exc:
+        print(f"erro: {exc}", file=sys.stderr)
+        return 1
+
+    propostas, offset = mapear(
+        session, cues, offset_s=args.offset, min_confianca=args.min_confianca
+    )
+    print(f"Defasagem entre os relógios: {offset:+.1f}s\n")
+    if not propostas:
+        print("nenhuma voz atingiu a confiança mínima; nada foi alterado.")
+        return 1
+
+    for proposta in propostas:
+        print(
+            f"  {proposta.label_atual} → {proposta.nome}  "
+            f"(confiança {proposta.confianca:.0%}, {proposta.sobreposicao_s:.0f}s em comum)"
+        )
+        outras = [n for n in proposta.alternativas if n != proposta.nome][:2]
+        if outras:
+            print(f"      também apareceu junto de: {', '.join(outras)}")
+
+    if args.simular:
+        print("\n(simulação: nada foi gravado)")
+        return 0
+
+    aplicar(session, propostas)
+    caminhos = session.salvar(origem.parent, formatos=("md", "json", "txt"))
+    print("\nAtualizado:")
+    for caminho in caminhos:
+        print(f"  {caminho}")
+
+    if args.cadastrar:
+        return _cadastrar_das_propostas(config, session, args.sim)
+    return 0
+
+
+def _cadastrar_das_propostas(config: AppConfig, session, sem_perguntar: bool) -> int:
+    """Transforma os centroides desta reunião em cadastro de voz.
+
+    É o atalho que o transcript oficial abre: quem foi identificado aqui passa a
+    ser reconhecido ao vivo na próxima reunião, sem ninguém gravar amostra.
+    """
+    from .diarize import VoiceProfileStore
+    from .diarize.profiles import AVISO_LGPD
+
+    # Depois de aplicar as propostas, a sessão é a fonte da verdade: nomes já
+    # renomeados, vozes já fundidas, centroides das que sobreviveram.
+    disponiveis = {
+        falante["speaker_id"]: falante["label"]
+        for falante in session.speakers
+        if falante.get("has_centroid") and falante.get("source") == "manual"
+    }
+    if not disponiveis:
+        print(
+            "\naviso: esta transcrição não guardou impressões vocais "
+            "(gravada antes da diarização?), então não há o que cadastrar."
+        )
+        return 0
+
+    pergunta = f"{AVISO_LGPD}\n\nCadastrar: {', '.join(sorted(disponiveis.values()))}"
+    if not _confirmar(pergunta, sem_perguntar):
+        print("cadastro cancelado.")
+        return 0
+
+    store = VoiceProfileStore(config.caminho_vozes())
+    for speaker_id, nome in disponiveis.items():
+        store.add(
+            nome, session.centroids[speaker_id], consent=True, note="identificado pelo transcript"
+        )
+    print(f"\n{len(disponiveis)} voz(es) cadastrada(s) em {config.caminho_vozes()}.")
+    return 0
+
+
+def _confirmar(mensagem: str, sem_perguntar: bool) -> bool:
+    print(f"\n{mensagem}\n")
+    if sem_perguntar:
+        return True
+    if not sys.stdin.isatty():
+        print("erro: sem terminal interativo; use --sim para confirmar.", file=sys.stderr)
+        return False
+    return input("Confirma? [s/N] ").strip().lower() in {"s", "sim", "y", "yes"}
 
 
 def _cmd_autoteste(config: AppConfig, _args) -> int:

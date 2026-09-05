@@ -53,8 +53,16 @@ Meet, de uma ligação telefônica no viva-voz ou de um vídeo gravado. Uma impl
 serve para todas, não depende de licença, de permissão de administrador nem de API
 estável — e o áudio não sai da máquina.
 
-O preço, já dito no README: sem os metadados da plataforma, não há como saber quem é
-quem entre os participantes remotos, nem gravar reunião da qual você não participa.
+O preço, já dito no README: sem os metadados da plataforma, não dá para separar fala
+sobreposta, nem gravar reunião da qual você não participa.
+
+Quanto a saber quem é quem, o transcript pós-reunião destas mesmas APIs vira uma
+peça útil: ele traz os nomes e os tempos, o que permite nomear retroativamente as
+vozes que o Escriba agrupou e, a partir dos centroides, cadastrar essas vozes para
+que apareçam com nome já ao vivo na reunião seguinte. É o comando `escriba nomear`.
+Hoje ele lê o arquivo que você baixa da plataforma; buscar pelo Graph, pela Webex
+Meeting Transcripts API ou pela Meet REST API é a extensão natural, e a única parte
+que exige credenciais e consentimento de administrador.
 
 ## Fontes
 

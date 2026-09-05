@@ -27,6 +27,8 @@ dependencies = [
 local = ["faster-whisper>=1.0", "scipy>=1.11"]
 # Interface web ao vivo.
 web = ["fastapi>=0.110", "uvicorn[standard]>=0.27", "websockets>=12"]
+# Separação e reconhecimento de vozes (quem falou o quê).
+diarizacao = ["sherpa-onnx>=1.10"]
 # Ata e itens de ação via Claude API.
 ata = ["anthropic>=1.0"]
 # Loopback nativo no Windows.

@@ -89,3 +89,74 @@ def test_salvar_gera_um_arquivo_por_formato(tmp_path):
 def test_formato_desconhecido_e_recusado(tmp_path):
     with pytest.raises(ValueError, match="formato desconhecido"):
         Session().salvar(tmp_path, formatos=("docx",))
+
+
+# ------------------------------------------------------------------- falantes
+
+
+def montar_com_falantes() -> Session:
+    session = Session("Reunião com diarização")
+    session.registrar_falante("S1", "Falante 1")
+    session.registrar_falante("S2", "Falante 2")
+    session.add_segment(track="sistema", speaker="Falante 1", speaker_id="S1",
+                        start_s=0, end_s=4, text="Bom dia a todos.")
+    session.add_segment(track="sistema", speaker="Falante 2", speaker_id="S2",
+                        start_s=5, end_s=9, text="Bom dia, podemos começar.")
+    session.add_segment(track="sistema", speaker="Falante 1", speaker_id="S1",
+                        start_s=30, end_s=33, text="Fechado então.")
+    return session
+
+
+def test_resumo_de_falantes_conta_tempo_e_trechos():
+    falantes = {f["speaker_id"]: f for f in montar_com_falantes().speakers}
+    assert falantes["S1"]["segments"] == 2
+    assert falantes["S1"]["total_s"] == 7.0
+    assert falantes["S2"]["segments"] == 1
+
+
+def test_renomear_falante_atinge_toda_a_transcricao():
+    session = montar_com_falantes()
+    resultado = session.renomear_falante("S1", "Ana Souza")
+
+    assert resultado == {"speaker_id": "S1", "absorbed": []}
+    assert [s.speaker for s in session.segments if s.speaker_id == "S1"] == ["Ana Souza"] * 2
+    assert "Ana Souza" in session.to_markdown()
+
+
+def test_renomear_para_nome_existente_funde_as_vozes():
+    session = montar_com_falantes()
+    session.renomear_falante("S1", "Ana")
+    resultado = session.renomear_falante("S2", "Ana")
+
+    assert resultado["absorbed"] == ["S2"]
+    assert {s.speaker_id for s in session.segments} == {"S1"}
+    assert len(session.speakers) == 1
+    # Com uma voz só, os três trechos viram um parágrafo por bloco de tempo.
+    assert session.speakers[0]["segments"] == 3
+
+
+def test_renomear_falante_desconhecido_falha():
+    with pytest.raises(KeyError):
+        montar_com_falantes().renomear_falante("S9", "Ana")
+
+
+def test_renomear_com_nome_vazio_falha():
+    with pytest.raises(ValueError, match="vazio"):
+        montar_com_falantes().renomear_falante("S1", "  ")
+
+
+def test_centroides_sobrevivem_a_ida_e_volta_pelo_json():
+    session = montar_com_falantes()
+    session.centroids = {"S1": [0.1, 0.2], "S2": [0.3, 0.4]}
+
+    copia = Session.from_json(session.to_json())
+    assert copia.centroids["S1"] == [0.1, 0.2]
+    assert [s.speaker_id for s in copia.segments] == ["S1", "S2", "S1"]
+    assert {f["label"] for f in copia.speakers} == {"Falante 1", "Falante 2"}
+
+
+def test_parcial_carrega_o_falante():
+    session = Session()
+    session.set_partial(track="sistema", speaker="Falante 1", speaker_id="S1",
+                        start_s=1.0, text="bom di")
+    assert session.partials[0]["speaker_id"] == "S1"

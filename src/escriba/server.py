@@ -24,6 +24,7 @@ except ImportError:  # o servidor web é opcional
 from .audio.capture import build_source
 from .audio.devices import DeviceError, list_input_devices
 from .config import AppConfig
+from .diarize import ConsentimentoAusente, VoiceProfileStore
 from .pipeline import TranscriptionPipeline
 from .session import Session
 from .summarize import SummaryError, gerar_ata
@@ -114,6 +115,33 @@ class AppState:
             ("microfone", self.config.mic_label, audio.mic_device, audio.capture_mic),
         ]
 
+    def renomear_falante(self, speaker_id: str, nome: str) -> dict:
+        """Renomeia durante ou depois da gravação.
+
+        Com o pipeline no ar, a troca também vale para o agrupamento, e as
+        próximas falas daquela pessoa já saem com o nome certo.
+        """
+        if self.pipeline is not None and self.pipeline.rodando:
+            return self.pipeline.renomear_falante(speaker_id, nome)
+        resultado = self.session.renomear_falante(speaker_id, nome)
+        self.publicar({"type": "speakers", "speakers": self.session.speakers})
+        return resultado
+
+    def cadastrar_voz(self, speaker_id: str, nome: str, *, consentimento: bool) -> dict:
+        """Guarda a impressão vocal de um falante desta reunião.
+
+        Usa o centroide já calculado, não o áudio — que nem é mantido. Só
+        funciona depois de encerrar, quando o centroide está fechado.
+        """
+        centroide = self.session.centroids.get(speaker_id)
+        if not centroide:
+            raise ValueError(
+                "ainda não há impressão vocal para este falante; encerre a gravação antes."
+            )
+        store = VoiceProfileStore(self.config.caminho_vozes())
+        perfil = store.add(nome, centroide, consent=consentimento, note="cadastrado na interface")
+        return perfil.resumo()
+
     def encerrar(self) -> list[str]:
         if self.pipeline is None:
             raise RuntimeError("nenhuma gravação em andamento.")
@@ -178,6 +206,40 @@ def criar_app(config: AppConfig) -> Any:
         except RuntimeError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
         return {"arquivos": arquivos}
+
+    @app.post("/api/falantes")
+    async def renomear_falante(payload: dict) -> dict:
+        speaker_id, nome = payload.get("speaker_id"), (payload.get("nome") or "")
+        if not speaker_id:
+            raise HTTPException(status_code=400, detail="informe o speaker_id.")
+        try:
+            resultado = estado.renomear_falante(speaker_id, nome)
+        except KeyError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        return {**resultado, "speakers": estado.session.speakers}
+
+    @app.get("/api/vozes")
+    async def listar_vozes() -> dict:
+        caminho = config.caminho_vozes()
+        if not caminho.exists():
+            return {"vozes": []}
+        return {"vozes": [p.resumo() for p in VoiceProfileStore(caminho).profiles]}
+
+    @app.post("/api/vozes")
+    async def cadastrar_voz(payload: dict) -> dict:
+        try:
+            return await asyncio.to_thread(
+                estado.cadastrar_voz,
+                payload.get("speaker_id", ""),
+                (payload.get("nome") or "").strip(),
+                consentimento=bool(payload.get("consentimento")),
+            )
+        except ConsentimentoAusente as exc:
+            raise HTTPException(status_code=403, detail=str(exc)) from exc
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
 
     @app.get("/api/exportar", response_class=PlainTextResponse)
     async def exportar(formato: str = "md") -> str:

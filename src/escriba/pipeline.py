@@ -25,6 +25,7 @@ from .asr import Transcriber, create_transcriber
 from .audio.capture import AudioSource
 from .audio.vad import EnergyVad
 from .config import AppConfig
+from .diarize import OnlineSpeakerClusterer, SpeakerEmbedder, VoiceProfileStore, create_embedder
 from .session import Session
 
 logger = logging.getLogger(__name__)
@@ -34,17 +35,23 @@ EventHandler = Callable[[Event], None]
 
 PRIORIDADE_FINAL = 0
 PRIORIDADE_PARCIAL = 1
+# A sentinela de parada entra depois de tudo: o que já está na fila ainda é
+# transcrito. Ela precisa ser um _Job de verdade, e não None — a fila de
+# prioridade compara os itens entre si quando os pesos empatam, e um None ali
+# derruba a thread de inferência bem na hora de encerrar.
+PRIORIDADE_SENTINELA = 2
 
 
 @dataclass(order=True)
 class _Job:
     prioridade: int
     seq: int
-    track: str = field(compare=False)
-    label: str = field(compare=False)
+    track: str = field(compare=False, default="")
+    label: str = field(compare=False, default="")
     audio: np.ndarray = field(compare=False, default=None)
     start_s: float = field(compare=False, default=0.0)
     end_s: float = field(compare=False, default=0.0)
+    parar: bool = field(compare=False, default=False)
 
 
 @dataclass
@@ -63,6 +70,8 @@ class PipelineStats:
     overflows: int = 0
     tempo_inferencia_s: float = 0.0
     audio_transcrito_s: float = 0.0
+    falantes: int = 0
+    tempo_diarizacao_s: float = 0.0
 
     @property
     def fator_tempo_real(self) -> float:
@@ -79,6 +88,7 @@ class TranscriptionPipeline:
         *,
         session: Session | None = None,
         transcriber: Transcriber | None = None,
+        embedder: SpeakerEmbedder | None = None,
         on_event: EventHandler | None = None,
     ) -> None:
         self.config = config
@@ -86,9 +96,25 @@ class TranscriptionPipeline:
         self.transcriber = transcriber or create_transcriber(config.asr)
         self.stats = PipelineStats()
 
+        self.embedder = embedder
+        self.clusterer: OnlineSpeakerClusterer | None = None
+        self._diarizacao_ativa = config.diarizacao.enabled or embedder is not None
+        if self._diarizacao_ativa:
+            self.embedder = embedder or create_embedder(config.diarizacao)
+            self.clusterer = OnlineSpeakerClusterer(
+                threshold=config.diarizacao.threshold,
+                max_speakers=config.diarizacao.max_speakers,
+                profiles=self._carregar_vozes(),
+                profile_threshold=config.vozes.threshold,
+                prefixo=config.diarizacao.prefixo,
+            )
+        # Último falante visto em cada trilha: falas curtas e hipóteses parciais
+        # herdam dele em vez de abrir um falante novo com um vetor instável.
+        self._ultimo_falante: dict[str, tuple[str, str]] = {}
+
         self._tracks: list[Track] = []
         self._handlers: list[EventHandler] = [on_event] if on_event else []
-        self._fila: queue.PriorityQueue[_Job | None] = queue.PriorityQueue()
+        self._fila: queue.PriorityQueue[_Job] = queue.PriorityQueue()
         self._seq = itertools.count()
         self._threads: list[threading.Thread] = []
         self._parada = threading.Event()
@@ -97,6 +123,21 @@ class TranscriptionPipeline:
         self._parcial_atual: dict[str, int] = {}
         self._lock = threading.Lock()
         self._t0 = 0.0
+
+    def _carregar_vozes(self) -> VoiceProfileStore | None:
+        """Cadastro de vozes, quando existe. Ausência não é erro: sem ele, os
+        falantes só ficam sem nome automático."""
+        if not self.config.vozes.enabled:
+            return None
+        caminho = self.config.caminho_vozes()
+        if not caminho.exists():
+            return None
+        try:
+            store = VoiceProfileStore(caminho)
+        except (OSError, ValueError, TypeError) as exc:
+            logger.warning("cadastro de vozes ilegível (%s): %s", caminho, exc)
+            return None
+        return store if len(store) else None
 
     # -------------------------------------------------------------- configuração
 
@@ -130,6 +171,7 @@ class TranscriptionPipeline:
         self._t0 = time.monotonic()
         self._emit({"type": "status", "state": "loading_model"})
         self.transcriber.warmup()
+        self._aquecer_diarizacao()
 
         worker = threading.Thread(target=self._loop_inferencia, name="asr", daemon=True)
         worker.start()
@@ -150,6 +192,24 @@ class TranscriptionPipeline:
             }
         )
 
+    def _aquecer_diarizacao(self) -> None:
+        """Carrega o modelo de voz antes da reunião começar.
+
+        Se ele faltar, a gravação continua sem diarização: perder a reunião
+        inteira por causa de um arquivo ausente seria o pior desfecho possível.
+        """
+        if not self._diarizacao_ativa or self.embedder is None:
+            return
+        try:
+            self.embedder.embed(np.zeros(self.config.audio.sample_rate, dtype=np.float32))
+        except Exception as exc:
+            logger.warning("diarização desativada: %s", exc)
+            self._diarizacao_ativa = False
+            self.clusterer = None
+            self._emit(
+                {"type": "error", "track": None, "message": f"diarização desativada: {exc}"}
+            )
+
     def stop(self, *, timeout: float = 20.0) -> None:
         if not self._rodando:
             return
@@ -164,13 +224,15 @@ class TranscriptionPipeline:
 
         # Sentinela depois das threads de captura: o que já entrou na fila é
         # transcrito antes de encerrar, para não perder a última frase.
-        self._fila.put(None)
+        self._fila.put(_Job(prioridade=PRIORIDADE_SENTINELA, seq=next(self._seq), parar=True))
         for thread in self._threads:
             if thread.name == "asr":
                 thread.join(timeout=max(0.1, limite - time.monotonic()))
 
         self._threads.clear()
         self._rodando = False
+        if self.clusterer is not None:
+            self.session.centroids = self.clusterer.centroids()
         self.session.encerrar()
         self.transcriber.close()
         self._emit({"type": "status", "state": "stopped", "stats": vars(self.stats)})
@@ -263,7 +325,8 @@ class TranscriptionPipeline:
     def _loop_inferencia(self) -> None:
         while True:
             job = self._fila.get()
-            if job is None:
+            if job.parar:
+                self._fila.task_done()
                 break
             try:
                 if job.prioridade == PRIORIDADE_PARCIAL and self._parcial_obsoleta(job):
@@ -293,28 +356,36 @@ class TranscriptionPipeline:
 
         if parcial:
             self.stats.parciais += 1
+            # A hipótese parcial herda o falante da última fala fechada da
+            # trilha: extrair vetor de um trecho que ainda está crescendo custa
+            # caro e muda de resposta a cada ciclo.
+            speaker_id, label = self._ultimo_falante.get(job.track, (None, job.label))
             self.session.set_partial(
-                track=job.track, speaker=job.label, start_s=job.start_s, text=resultado.text
+                track=job.track, speaker=label, start_s=job.start_s,
+                text=resultado.text, speaker_id=speaker_id,
             )
             self._emit(
                 {
                     "type": "partial",
                     "track": job.track,
-                    "speaker": job.label,
+                    "speaker": label,
+                    "speaker_id": speaker_id,
                     "start_s": job.start_s,
                     "text": resultado.text,
                 }
             )
             return
 
+        speaker_id, label, novo_falante = self._identificar_falante(job)
         segment = self.session.add_segment(
             track=job.track,
-            speaker=job.label,
+            speaker=label,
             start_s=job.start_s,
             end_s=job.end_s,
             text=resultado.text,
             avg_logprob=resultado.avg_logprob,
             low_confidence_limite=self.config.asr.low_confidence_logprob,
+            speaker_id=speaker_id,
         )
         if segment is None:
             self.session.clear_partial(job.track)
@@ -324,6 +395,56 @@ class TranscriptionPipeline:
 
         self.stats.trechos += 1
         self._emit({"type": "segment", **segment.to_dict(), "latency_s": decorrido})
+        if novo_falante:
+            self.stats.falantes = len(self.session.speakers)
+            self._emit({"type": "speakers", "speakers": self.session.speakers})
+
+    def _identificar_falante(self, job: _Job) -> tuple[str | None, str, bool]:
+        """Diz de quem é a fala. Devolve (speaker_id, rótulo, é_falante_novo)."""
+        if not self._diarizacao_ativa or self.clusterer is None:
+            return None, job.label, False
+        if job.track not in self.config.diarizacao.tracks:
+            # O microfone não precisa de diarização: é sempre a mesma pessoa.
+            return None, job.label, False
+
+        duracao = job.audio.size / self.config.audio.sample_rate
+        if duracao < self.config.diarizacao.min_audio_s:
+            # "Sim", "uhum", "certo": curto demais para um vetor confiável.
+            # Herdar quem acabou de falar erra menos do que inventar um falante.
+            anterior = self._ultimo_falante.get(job.track)
+            return (*anterior, False) if anterior else (None, job.label, False)
+
+        inicio = time.monotonic()
+        try:
+            embedding = self.embedder.embed(job.audio, self.config.audio.sample_rate)
+            atribuicao = self.clusterer.assign(embedding, duracao)
+        except Exception as exc:
+            logger.exception("falha ao identificar o falante")
+            self._emit({"type": "error", "track": job.track, "message": str(exc)})
+            return None, job.label, False
+        finally:
+            self.stats.tempo_diarizacao_s += time.monotonic() - inicio
+
+        speaker = atribuicao.speaker
+        self.session.registrar_falante(
+            speaker.id, speaker.label, source=speaker.source, profile_id=speaker.profile_id
+        )
+        self._ultimo_falante[job.track] = (speaker.id, speaker.label)
+        return speaker.id, speaker.label, atribuicao.is_new
+
+    def renomear_falante(self, speaker_id: str, nome: str) -> dict[str, Any]:
+        """Renomeia uma voz na sessão e no agrupamento, e avisa os assinantes."""
+        resultado = self.session.renomear_falante(speaker_id, nome)
+        if self.clusterer is not None and self.clusterer.get(speaker_id) is not None:
+            try:
+                self.clusterer.rename(speaker_id, nome)
+            except (KeyError, ValueError):
+                logger.debug("falante %s já não existe no agrupamento", speaker_id)
+        for trilha, (identificador, _) in list(self._ultimo_falante.items()):
+            if identificador in ([speaker_id] + resultado["absorbed"]):
+                self._ultimo_falante[trilha] = (resultado["speaker_id"], nome)
+        self._emit({"type": "speakers", "speakers": self.session.speakers})
+        return resultado
 
     # ---------------------------------------------------------------------- eventos
 

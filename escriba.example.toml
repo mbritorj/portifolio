@@ -30,6 +30,28 @@ compute_type = "auto"  # auto | float16 | int8_float16 | int8
 language = "pt"
 partial_interval_s = 1.2
 
+[diarizacao]
+# Separa as vozes dos participantes remotos ("Falante 1", "Falante 2"...).
+# Precisa de um modelo de embedding de falante em .onnx, baixado à parte:
+#   curl -LO https://github.com/k2-fsa/sherpa-onnx/releases/download/speaker-recongition-models/3dspeaker_speech_campplus_sv_zh_en_16k-common_advanced.onnx
+enabled = false
+# model = "modelos/3dspeaker_speech_campplus_sv_zh_en_16k-common_advanced.onnx"
+# Cosseno mínimo para juntar duas falas na mesma pessoa. Abaixe se a mesma voz
+# estiver virando dois falantes; suba se duas pessoas estiverem se misturando.
+threshold = 0.55
+max_speakers = 12
+min_audio_s = 1.2
+# O microfone é sempre você, então só a trilha remota é separada.
+tracks = ["sistema", "arquivo"]
+
+[vozes]
+# Nome automático para quem já foi cadastrado com `escriba vozes cadastrar`.
+enabled = true
+store = "vozes.json"
+# Limiar mais alto que o do agrupamento: errar o nome de alguém é pior do que
+# deixar como "Falante 2".
+threshold = 0.62
+
 [summary]
 enabled = true
 model = "claude-opus-5"

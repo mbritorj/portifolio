@@ -48,6 +48,19 @@
   .pulso { width: 9px; height: 9px; border-radius: 50%; background: var(--suave); display: inline-block; }
   .pulso.ativo { background: var(--alerta); animation: pisca 1.6s ease-in-out infinite; }
   @keyframes pisca { 50% { opacity: .25; } }
+  .falantes { display: flex; gap: 8px; flex-wrap: wrap; margin: 0 0 18px; }
+  .chip {
+    display: inline-flex; align-items: center; gap: 7px; padding: 5px 10px;
+    border: 1px solid var(--borda); border-radius: 999px; background: var(--painel);
+    font-size: 13px;
+  }
+  .chip .ponto { width: 9px; height: 9px; border-radius: 50%; flex: none; }
+  .chip .tempo { color: var(--suave); }
+  .chip button {
+    padding: 1px 6px; font-size: 12px; line-height: 1.5; border-radius: 6px;
+    background: transparent; border-color: transparent; color: var(--suave);
+  }
+  .chip button:hover:not(:disabled) { color: var(--texto); border-color: var(--borda); }
   .linha {
     display: grid; grid-template-columns: 62px 1fr; gap: 12px;
     padding: 10px 0; border-bottom: 1px solid var(--borda);
@@ -88,6 +101,8 @@
     <span id="mensagem" class="erro"></span>
   </div>
 
+  <div class="falantes" id="falantes"></div>
+
   <div id="transcricao"><p class="vazio">A transcrição aparece aqui assim que a reunião começa.</p></div>
   <div id="ata" hidden></div>
 </main>
@@ -109,12 +124,32 @@ function hhmmss(segundos) {
   return `${h}:${m}:${s}`;
 }
 
+// Uma cor por voz detectada, atribuída na ordem em que aparecem.
+// Sem o verde-azulado do microfone na lista: "Eu" precisa continuar distinguível
+// dos participantes remotos.
+const PALETA = ["#3a5a94", "#b4552d", "#7d4b8f", "#96682a", "#3f7d9c", "#a3455f", "#4a6b2f"];
+const PALETA_ESCURA = ["#8fb0e6", "#e08a5f", "#c39bd8", "#dcae70", "#7cc0dc", "#e28ba1", "#9ac26a"];
+const coresPorFalante = new Map();
+let falantes = [];
+
+function temaEscuro() {
+  return window.matchMedia && window.matchMedia("(prefers-color-scheme: dark)").matches;
+}
+
+function corDoFalante(speakerId) {
+  if (!speakerId) return null;
+  if (!coresPorFalante.has(speakerId)) coresPorFalante.set(speakerId, coresPorFalante.size);
+  const indice = coresPorFalante.get(speakerId);
+  const paleta = temaEscuro() ? PALETA_ESCURA : PALETA;
+  return paleta[indice % paleta.length];
+}
+
 function limparVazio() {
   const vazio = transcricao.querySelector(".vazio");
   if (vazio) vazio.remove();
 }
 
-function montarLinha({ hora, trilha, falante, texto, parcial, incerto }) {
+function montarLinha({ hora, trilha, falante, texto, parcial, incerto, speakerId }) {
   const linha = document.createElement("div");
   linha.className = "linha" + (parcial ? " parcial" : "");
   const coluna = document.createElement("div");
@@ -124,6 +159,8 @@ function montarLinha({ hora, trilha, falante, texto, parcial, incerto }) {
   if (incerto) corpo.className = "incerto";
   const nome = document.createElement("span");
   nome.className = "falante " + (trilha === "microfone" ? "microfone" : "sistema");
+  const cor = corDoFalante(speakerId);
+  if (cor) nome.style.color = cor;
   nome.textContent = falante + ":";
   corpo.append(nome, document.createTextNode(texto));
   linha.append(coluna, corpo);
@@ -142,6 +179,7 @@ function aplicarSegmento(evento) {
   transcricao.append(montarLinha({
     hora: evento.start_label, trilha: evento.track, falante: evento.speaker,
     texto: evento.text, parcial: false, incerto: evento.low_confidence,
+    speakerId: evento.speaker_id,
   }));
   if (colar) window.scrollTo(0, document.body.scrollHeight);
 }
@@ -155,11 +193,78 @@ function aplicarParcial(evento) {
   const colar = noFim();
   const linha = montarLinha({
     hora: hhmmss(evento.start_s), trilha: evento.track, falante: evento.speaker,
-    texto: evento.text, parcial: true, incerto: false,
+    texto: evento.text, parcial: true, incerto: false, speakerId: evento.speaker_id,
   });
   transcricao.append(linha);
   parciais.set(evento.track, linha);
   if (colar) window.scrollTo(0, document.body.scrollHeight);
+}
+
+function desenharFalantes(lista) {
+  falantes = lista || [];
+  const alvo = $("falantes");
+  alvo.innerHTML = "";
+  falantes.forEach((falante) => {
+    const chip = document.createElement("span");
+    chip.className = "chip";
+
+    const ponto = document.createElement("i");
+    ponto.className = "ponto";
+    ponto.style.background = corDoFalante(falante.speaker_id) || "var(--suave)";
+
+    const nome = document.createElement("strong");
+    nome.textContent = falante.label;
+
+    const tempo = document.createElement("span");
+    tempo.className = "tempo";
+    const falas = falante.segments === 1 ? "fala" : "falas";
+    tempo.textContent = `${falante.segments} ${falas} · ${hhmmss(falante.total_s)}`;
+
+    const renomear = document.createElement("button");
+    renomear.textContent = "renomear";
+    renomear.onclick = () => pedirNome(falante);
+
+    chip.append(ponto, nome, tempo, renomear);
+
+    // Cadastrar a voz só faz sentido com a gravação encerrada (é quando o
+    // centroide fecha) e com um nome de gente, não com "Falante 2".
+    if (falante.has_centroid && !gravando && falante.source !== "cluster") {
+      const cadastrar = document.createElement("button");
+      cadastrar.textContent = "cadastrar voz";
+      cadastrar.onclick = () => cadastrarVoz(falante);
+      chip.append(cadastrar);
+    }
+    alvo.append(chip);
+  });
+}
+
+async function pedirNome(falante) {
+  const nome = window.prompt("Nome desta pessoa:", falante.label);
+  if (!nome || nome.trim() === falante.label) return;
+  try {
+    const dados = await chamar("/api/falantes", { speaker_id: falante.speaker_id, nome });
+    desenharFalantes(dados.speakers);
+    // O rótulo mudou em toda a transcrição; recarrega para refletir.
+    desenharSnapshot(await (await fetch("/api/estado")).json());
+  } catch (erro) {
+    $("mensagem").textContent = erro.message;
+  }
+}
+
+async function cadastrarVoz(falante) {
+  const aviso =
+    `Cadastrar a impressão vocal de ${falante.label}?\n\n` +
+    "A impressão vocal identifica uma pessoa e é dado pessoal sensível (LGPD, art. 11). " +
+    "Cadastre apenas com o consentimento dela. O arquivo fica nesta máquina.";
+  if (!window.confirm(aviso)) return;
+  try {
+    await chamar("/api/vozes", {
+      speaker_id: falante.speaker_id, nome: falante.label, consentimento: true,
+    });
+    $("mensagem").textContent = `voz de ${falante.label} cadastrada`;
+  } catch (erro) {
+    $("mensagem").textContent = erro.message;
+  }
 }
 
 function atualizarContagem() {
@@ -184,6 +289,7 @@ function desenharSnapshot(dados) {
   dados.segments.forEach(aplicarSegmento);
   // Quem abre a página no meio da reunião também vê a fala em andamento.
   (dados.partials || []).forEach(aplicarParcial);
+  desenharFalantes(dados.speakers);
   if (dados.gravando) {
     definirEstado("gravando", true);
     inicioMs = Date.now() - dados.duracao_s * 1000;
@@ -226,11 +332,14 @@ function conectar() {
       aplicarSegmento(evento);
     } else if (evento.type === "partial") {
       aplicarParcial(evento);
+    } else if (evento.type === "speakers") {
+      desenharFalantes(evento.speakers);
     } else if (evento.type === "status") {
       if (evento.state === "loading_model") definirEstado("carregando modelo…", false);
       if (evento.state === "recording") { definirEstado("gravando", true); inicioMs = Date.now(); }
       if (evento.state === "stopped") {
         definirEstado("encerrado", false);
+        fetch("/api/estado").then((r) => r.json()).then((d) => desenharFalantes(d.speakers));
         const s = evento.stats || {};
         if (s.audio_transcrito_s) {
           const fator = (s.tempo_inferencia_s / s.audio_transcrito_s).toFixed(2);
@@ -269,6 +378,8 @@ $("iniciar").onclick = async () => {
   try {
     transcricao.innerHTML = '<p class="vazio">Aguardando fala…</p>';
     parciais.clear();
+    coresPorFalante.clear();
+    desenharFalantes([]);
     $("ata").hidden = true;
     await chamar("/api/iniciar", { titulo: $("titulo").value.trim() || null });
   } catch (erro) {

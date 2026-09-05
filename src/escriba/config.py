@@ -84,6 +84,38 @@ class AsrConfig:
 
 
 @dataclass
+class DiarizacaoConfig:
+    """Separação das vozes dentro de uma trilha (quem falou o quê)."""
+
+    # Desligada por padrão: precisa de um modelo .onnx baixado à parte.
+    enabled: bool = False
+    engine: str = "sherpa"  # sherpa | mock
+    model: str = ""  # caminho do modelo de embedding de falante
+    num_threads: int = 1
+    provider: str = "cpu"  # cpu | cuda
+    # Cosseno mínimo para considerar que duas falas são da mesma pessoa.
+    threshold: float = 0.55
+    max_speakers: int = 12
+    # Falas curtas dão vetores instáveis; abaixo disso, herdam o último falante.
+    min_audio_s: float = 1.2
+    # O microfone é sempre você, então só a trilha remota precisa ser separada.
+    tracks: list[str] = field(default_factory=lambda: ["sistema", "arquivo"])
+    prefixo: str = "Falante"
+
+
+@dataclass
+class VozesConfig:
+    """Cadastro de vozes: dá nome automático a quem já foi cadastrado."""
+
+    enabled: bool = True
+    # Relativo a ``output_dir`` quando não for um caminho absoluto.
+    store: str = "vozes.json"
+    # Limiar mais alto que o do agrupamento: pôr o nome errado em alguém é um
+    # erro pior do que deixar como "Falante 2".
+    threshold: float = 0.62
+
+
+@dataclass
 class SummaryConfig:
     """Ata e itens de ação via Claude API (opcional)."""
 
@@ -103,6 +135,8 @@ class AppConfig:
     audio: AudioConfig = field(default_factory=AudioConfig)
     vad: VadConfig = field(default_factory=VadConfig)
     asr: AsrConfig = field(default_factory=AsrConfig)
+    diarizacao: DiarizacaoConfig = field(default_factory=DiarizacaoConfig)
+    vozes: VozesConfig = field(default_factory=VozesConfig)
     summary: SummaryConfig = field(default_factory=SummaryConfig)
     server: ServerConfig = field(default_factory=ServerConfig)
     output_dir: Path = Path("transcricoes")
@@ -120,6 +154,11 @@ class AppConfig:
                 _apply_mapping(config, tomllib.load(handle))
         _apply_env(config)
         return config
+
+    def caminho_vozes(self) -> Path:
+        """Onde fica o cadastro de vozes, resolvido contra ``output_dir``."""
+        caminho = Path(self.vozes.store)
+        return caminho if caminho.is_absolute() else self.output_dir / caminho
 
 
 def _resolve_config_path(path: str | Path | None) -> Path | None:
@@ -154,6 +193,10 @@ def _coerce(annotation: Any, value: Any) -> Any:
     return value
 
 
+def _bool_env(valor: str) -> bool:
+    return valor.strip().lower() in {"1", "true", "sim", "on", "yes"}
+
+
 # Variáveis de ambiente reconhecidas -> (seção, campo, conversor).
 _ENV_MAP: dict[str, tuple[str | None, str, Any]] = {
     "ESCRIBA_MODEL": ("asr", "model", str),
@@ -168,6 +211,10 @@ _ENV_MAP: dict[str, tuple[str | None, str, Any]] = {
     "ESCRIBA_PORT": ("server", "port", int),
     "ESCRIBA_SUMMARY_MODEL": ("summary", "model", str),
     "ESCRIBA_OUTPUT_DIR": (None, "output_dir", Path),
+    "ESCRIBA_DIARIZACAO": ("diarizacao", "enabled", _bool_env),
+    "ESCRIBA_DIARIZACAO_MODEL": ("diarizacao", "model", str),
+    "ESCRIBA_DIARIZACAO_ENGINE": ("diarizacao", "engine", str),
+    "ESCRIBA_VOZES_STORE": ("vozes", "store", str),
 }
 
 

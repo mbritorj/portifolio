@@ -88,3 +88,93 @@ def test_evento_do_pipeline_chega_ao_websocket(cliente):
 
 def test_publicar_sem_cliente_conectado_nao_quebra(cliente):
     cliente.app_state.publicar({"type": "segment", "text": "ninguém ouvindo"})
+
+
+# ------------------------------------------------------------------- falantes
+
+
+def semear_falantes(cliente):
+    session = cliente.app_state.session
+    session.registrar_falante("S1", "Falante 1")
+    session.registrar_falante("S2", "Falante 2")
+    session.add_segment(track="sistema", speaker="Falante 1", speaker_id="S1",
+                        start_s=0, end_s=4, text="Bom dia.")
+    session.add_segment(track="sistema", speaker="Falante 2", speaker_id="S2",
+                        start_s=5, end_s=9, text="Bom dia, vamos começar.")
+    return session
+
+
+def test_estado_lista_os_falantes(cliente):
+    semear_falantes(cliente)
+    falantes = cliente.get("/api/estado").json()["speakers"]
+    assert [f["label"] for f in falantes] == ["Falante 1", "Falante 2"]
+    assert falantes[0]["has_centroid"] is False
+
+
+def test_renomear_falante_pela_api(cliente):
+    session = semear_falantes(cliente)
+    resposta = cliente.post("/api/falantes", json={"speaker_id": "S1", "nome": "Ana Souza"})
+
+    assert resposta.status_code == 200
+    assert resposta.json()["speaker_id"] == "S1"
+    assert session.segments[0].speaker == "Ana Souza"
+    assert "Ana Souza" in cliente.get("/api/exportar?formato=md").text
+
+
+def test_renomear_falante_inexistente_devolve_404(cliente):
+    semear_falantes(cliente)
+    resposta = cliente.post("/api/falantes", json={"speaker_id": "S9", "nome": "Ana"})
+    assert resposta.status_code == 404
+
+
+def test_renomear_sem_nome_devolve_400(cliente):
+    semear_falantes(cliente)
+    assert cliente.post("/api/falantes", json={"speaker_id": "S1", "nome": " "}).status_code == 400
+
+
+def test_renomear_avisa_os_clientes_conectados(cliente):
+    semear_falantes(cliente)
+    with cliente.websocket_connect("/ws") as ws:
+        ws.receive_json()  # snapshot
+        cliente.post("/api/falantes", json={"speaker_id": "S1", "nome": "Ana"})
+        evento = ws.receive_json()
+    assert evento["type"] == "speakers"
+    assert evento["speakers"][0]["label"] == "Ana"
+
+
+def test_cadastro_de_voz_exige_consentimento(cliente):
+    session = semear_falantes(cliente)
+    session.centroids = {"S1": [0.1, 0.9, 0.2]}
+    resposta = cliente.post(
+        "/api/vozes", json={"speaker_id": "S1", "nome": "Ana", "consentimento": False}
+    )
+    assert resposta.status_code == 403
+    assert "sensível" in resposta.json()["detail"]
+
+
+def test_cadastro_de_voz_sem_centroide_e_recusado(cliente):
+    semear_falantes(cliente)
+    resposta = cliente.post(
+        "/api/vozes", json={"speaker_id": "S1", "nome": "Ana", "consentimento": True}
+    )
+    assert resposta.status_code == 400
+    assert "encerre a gravação" in resposta.json()["detail"]
+
+
+def test_cadastro_de_voz_persiste_e_aparece_na_listagem(cliente):
+    session = semear_falantes(cliente)
+    session.centroids = {"S1": [0.1, 0.9, 0.2]}
+    cliente.post("/api/falantes", json={"speaker_id": "S1", "nome": "Ana Souza"})
+
+    resposta = cliente.post(
+        "/api/vozes", json={"speaker_id": "S1", "nome": "Ana Souza", "consentimento": True}
+    )
+    assert resposta.status_code == 200
+    assert resposta.json()["name"] == "Ana Souza"
+
+    vozes = cliente.get("/api/vozes").json()["vozes"]
+    assert [v["name"] for v in vozes] == ["Ana Souza"]
+
+
+def test_listagem_de_vozes_vazia_quando_nao_ha_cadastro(cliente):
+    assert cliente.get("/api/vozes").json() == {"vozes": []}
