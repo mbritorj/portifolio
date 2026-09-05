@@ -288,7 +288,7 @@ def test_voz_cadastrada_recebe_o_nome(gerar_audio, escrever_wav, tmp_path):
     store.add("Ana Souza", embedder.embed(fala(3.0, 150)), consent=True)
 
     config = montar_config_diarizado()
-    config.output_dir = tmp_path
+    config.vozes.store = str(tmp_path / "vozes.json")
     pipeline = rodar_diarizado(caminho, config=config)
 
     assert pipeline.session.segments[0].speaker == "Ana Souza"

@@ -49,13 +49,22 @@ def construir_parser() -> argparse.ArgumentParser:
     arquivo = sub.add_parser("arquivo", help="transcreve um WAV já gravado")
     arquivo.add_argument("caminho", help="arquivo WAV PCM 16 bits")
     arquivo.add_argument("--falante", default="Participantes", help="rótulo do falante")
-    arquivo.add_argument("--formatos", default="md,json",
+    arquivo.add_argument("--formatos", default="md,json,claude",
                          help="formatos de saída separados por vírgula (md, txt, srt, json)")
 
     ata = sub.add_parser("ata", help="gera ata e itens de ação a partir de uma transcrição .json")
     ata.add_argument("caminho", help="arquivo .json exportado pelo Escriba")
     ata.add_argument("--instrucoes", help="orientação extra para a ata")
     ata.add_argument("--saida", help="arquivo .md de destino (padrão: ao lado do .json)")
+
+    exportar = sub.add_parser(
+        "exportar", help="gera o arquivo da transcrição pronto para subir no Claude"
+    )
+    exportar.add_argument("caminho", help="arquivo .json exportado pelo Escriba")
+    exportar.add_argument("--saida", help="arquivo de destino (padrão: ao lado do .json)")
+    exportar.add_argument(
+        "--sem-pedido", action="store_true", help="não imprime o pedido para colar no Claude"
+    )
 
     vozes = sub.add_parser("vozes", help="cadastro de vozes (nome automático dos falantes)")
     acao = vozes.add_subparsers(dest="acao", required=True)
@@ -126,6 +135,7 @@ def main(argv: list[str] | None = None) -> int:
         "servir": _cmd_servir,
         "arquivo": _cmd_arquivo,
         "ata": _cmd_ata,
+        "exportar": _cmd_exportar,
         "vozes": _cmd_vozes,
         "nomear": _cmd_nomear,
         "autoteste": _cmd_autoteste,
@@ -207,7 +217,7 @@ def _cmd_gravar(config: AppConfig, args) -> int:
     print(f"Gravando «{session.titulo}». Ctrl+C encerra e salva.\n")
     pipeline.run_until_complete(parada=parada)
 
-    caminhos = session.salvar(config.output_dir, formatos=("md", "json", "txt"))
+    caminhos = session.salvar(config.output_dir, formatos=("md", "json", "txt", "claude"))
     print("\nSalvo em:")
     for caminho in caminhos:
         print(f"  {caminho}")
@@ -279,6 +289,35 @@ def _cmd_ata(config: AppConfig, args) -> int:
         f"\n[{resumo.modelo}: {resumo.tokens_entrada} tokens de entrada, "
         f"{resumo.tokens_saida} de saída]\nSalvo em: {destino}"
     )
+    return 0
+
+
+def _cmd_exportar(config: AppConfig, args) -> int:
+    from .session import Session
+    from .summarize import PEDIDO_ATA
+
+    origem = Path(args.caminho)
+    if not origem.exists():
+        print(f"erro: {origem} não existe.", file=sys.stderr)
+        return 1
+
+    session = Session.from_json(origem.read_text(encoding="utf-8"))
+    if not session.segments:
+        print(f"erro: {origem} não tem trechos transcritos.", file=sys.stderr)
+        return 1
+
+    destino = Path(args.saida) if args.saida else origem.with_suffix(".claude.md")
+    destino.parent.mkdir(parents=True, exist_ok=True)
+    destino.write_text(session.to_claude(), encoding="utf-8")
+    print(f"Arquivo para o Claude: {destino}")
+
+    if not args.sem_pedido:
+        print(
+            "\nAnexe esse arquivo em uma conversa no Claude e cole o pedido abaixo.\n"
+            "\n" + "-" * 72 + "\n"
+        )
+        print(PEDIDO_ATA)
+        print("-" * 72)
     return 0
 
 
@@ -410,7 +449,7 @@ def _cmd_nomear(config: AppConfig, args) -> int:
         return 0
 
     aplicar(session, propostas)
-    caminhos = session.salvar(origem.parent, formatos=("md", "json", "txt"))
+    caminhos = session.salvar(origem.parent, formatos=("md", "json", "txt", "claude"))
     print("\nAtualizado:")
     for caminho in caminhos:
         print(f"  {caminho}")

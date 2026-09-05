@@ -47,7 +47,10 @@ tracks = ["sistema", "arquivo"]
 [vozes]
 # Nome automático para quem já foi cadastrado com `escriba vozes cadastrar`.
 enabled = true
-store = "vozes.json"
+# Vazio = ~/.config/escriba/vozes.json. Fica fora da pasta de transcrições de
+# propósito: impressão vocal é dado biométrico e não deve viajar junto quando
+# você compartilha as atas de uma reunião.
+store = ""
 # Limiar mais alto que o do agrupamento: errar o nome de alguém é pior do que
 # deixar como "Falante 2".
 threshold = 0.62

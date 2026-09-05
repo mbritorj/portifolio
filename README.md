@@ -15,11 +15,24 @@ Você entra na reunião normalmente.
                                                             ▼
                                        Whisper local (pt-BR, na sua máquina)
                                                             ▼
-                            transcrição ao vivo + .md/.txt/.srt/.json + ata opcional
+          transcrição ao vivo + .md/.txt/.srt/.json + arquivo pronto para o Claude
 ```
 
-Nada é enviado para fora do computador durante a reunião. A única etapa remota é a
-geração da ata pela Claude API, que é opcional e só acontece quando você clica.
+Nada é enviado para fora do computador durante a reunião. No fim, você leva a
+transcrição para o Claude e pede o resumo e a lista de tarefas — por anexo, no aplicativo,
+ou pela API, se preferir automatizar.
+
+## O fluxo de uma reunião
+
+1. `escriba servir` antes de entrar na reunião, e **Iniciar**.
+2. A transcrição aparece ao vivo, com uma cor por voz. Quem já tem voz cadastrada
+   aparece com o nome; os demais, como "Falante 2".
+3. **Encerrar** grava tudo em `transcricoes/` e fecha os nomes.
+4. Ajuste o que faltou: renomeie os falantes anônimos (dois cliques), ou rode
+   `escriba nomear` com o transcript oficial da plataforma para nomear todos de uma vez.
+5. **Para o Claude**: baixa o arquivo da transcrição e mostra o pedido para colar. No
+   Claude, anexe o arquivo, cole o pedido e receba o resumo dos tópicos, a tabela de
+   tarefas com responsáveis e prazos, e os pontos em aberto.
 
 ---
 
@@ -156,16 +169,41 @@ escriba arquivo reuniao.wav --falante "Cliente"
 # outros formatos: ffmpeg -i reuniao.m4a -ac 1 -ar 16000 -c:a pcm_s16le reuniao.wav
 ```
 
-### Ata, decisões e itens de ação
+### Levar a transcrição para o Claude
+
+Este é o caminho principal: a reunião termina, você anexa um arquivo no Claude e pede a
+ata. Toda gravação já grava esse arquivo pronto, o `.claude.md`, junto com os outros
+formatos.
+
+Na interface, o botão **Para o Claude** baixa o arquivo e mostra o pedido para copiar.
+Pela linha de comando:
+
+```bash
+escriba exportar transcricoes/2026-09-05_1430_kickoff.json
+```
+
+Ele grava o `.claude.md` e imprime o pedido pronto para colar. O arquivo não é o mesmo
+markdown de leitura: ele começa com **quem falou e quanto cada um falou**, diz de onde
+veio cada nome (cadastro de voz, informado por você, ou voz sem identificação) e avisa
+que o texto vem de reconhecimento automático. São essas três informações que fazem a
+diferença entre uma lista de tarefas com responsáveis certos e uma cheia de suposições.
+
+O pedido que acompanha o arquivo pede resumo, tópicos discutidos, tabela de tarefas
+(tarefa / responsável / prazo / onde foi dito) e pontos em aberto — e instrui a marcar
+"não identificado" quando quem assumiu a tarefa for uma voz sem nome, em vez de chutar.
+
+### Ata sem sair do Escriba
+
+Se preferir não passar pelo aplicativo do Claude, o mesmo pedido pode ir pela API:
 
 ```bash
 export ANTHROPIC_API_KEY=...        # ou: ant auth login
-escriba ata transcricoes/2026-09-05_1430_reuniao-de-kickoff.json
+escriba ata transcricoes/2026-09-05_1430_kickoff.json
 ```
 
-Sai um markdown com resumo, decisões, tabela de itens de ação (ação / responsável /
-prazo) e pontos em aberto. Só esta etapa envia dados para fora da máquina, e o que sai é
-o texto já transcrito — nunca o áudio.
+Os dois caminhos usam exatamente o mesmo material e o mesmo pedido, então produzem o
+mesmo documento. Esta é a única etapa que envia dados para fora da máquina, e o que sai
+é o texto já transcrito — nunca o áudio.
 
 ---
 
@@ -238,8 +276,10 @@ art. 5º, II e art. 11). O Escriba trata isso assim:
 * agrupar vozes de forma anônima ("Falante 2") não cadastra nada;
 * cadastrar exige consentimento explícito — pela interface, uma confirmação; pela
   linha de comando, responder à pergunta ou passar `--sim`;
-* o arquivo `vozes.json` fica na sua máquina, com a data do consentimento
-  registrada, e `escriba vozes remover` apaga;
+* o cadastro fica em `~/.config/escriba/vozes.json`, **fora** da pasta de
+  transcrições — assim, compactar e enviar as atas de uma reunião não leva junto as
+  impressões vocais de ninguém;
+* cada perfil guarda a data do consentimento, e `escriba vozes remover` apaga;
 * o áudio nunca é guardado: o que fica é o vetor.
 
 ### O que ainda não funciona
@@ -351,7 +391,7 @@ O que este projeto recomenda, e o que ele já faz por você:
 
 ```bash
 pip install -e ".[dev]"
-pytest          # 130 testes, sem hardware de áudio e sem baixar modelo
+pytest          # 144 testes, sem hardware de áudio e sem baixar modelo
 ruff check src tests
 ```
 

@@ -128,6 +128,24 @@ No primeiro bloco de cada trilha, o pipeline guarda a diferença para o instante
 gravação começou e soma esse deslocamento em todos os tempos. Sem isso, uma trilha que
 abre 200 ms depois da outra ficaria permanentemente adiantada na transcrição.
 
+## A entrega para o Claude
+
+O arquivo `.claude.md` (`Session.to_claude`) é o produto final do sistema, e não é o
+markdown de leitura com outro nome. Ele acrescenta três coisas que mudam a qualidade da
+ata:
+
+1. **Quem falou e quanto**, com a procedência de cada nome — cadastro de voz, informado
+   por quem gravou, ou voz sem identificação. É o que permite atribuir tarefa a pessoa.
+2. **Um aviso explícito sobre as vozes anônimas**, para que o modelo registre
+   "não identificado" em vez de deduzir de quem é a tarefa.
+3. **A declaração de que o texto vem de reconhecimento automático**, com os trechos de
+   baixa confiança marcados com `(?)`, para que trecho estranho seja tratado como erro
+   de transcrição e não como algo que alguém disse.
+
+O pedido que acompanha o arquivo (`summarize.PEDIDO_ATA`) é o mesmo que o comando
+`escriba ata` envia pela API. Manter um texto só evita que os dois caminhos divirjam:
+quem anexa no aplicativo e quem automatiza pela API recebem o mesmo documento.
+
 ## Formato do áudio
 
 Tudo é normalizado na entrada do pipeline para `float32` mono a 16 kHz. A reamostragem

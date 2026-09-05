@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import re
 import threading
 from collections.abc import Iterable
 from dataclasses import asdict, dataclass
@@ -296,6 +297,101 @@ class Session:
             )
         return "\n".join(blocos)
 
+    def to_claude(self) -> str:
+        """Transcrição pronta para subir no Claude e virar ata.
+
+        Difere do markdown comum em três pontos que mudam a qualidade da
+        resposta: lista quem falou e quanto (para atribuir tarefas a pessoas
+        reais), avisa quais vozes ficaram sem nome (para o modelo não chutar) e
+        declara que o texto vem de reconhecimento automático (para ele tratar
+        trecho estranho como erro de transcrição, não como algo que foi dito).
+        """
+        participantes = self._resumo_participantes()
+        anonimos = [p for p in participantes if _parece_anonimo(p["label"])]
+        nomeados = [p for p in participantes if not _parece_anonimo(p["label"])]
+
+        linhas = [
+            f"# Transcrição — {self.titulo}",
+            "",
+            f"- Data: {self.iniciada_em.strftime('%d/%m/%Y %H:%M')}",
+            f"- Duração: {_timestamp(self.duracao_s)}",
+            f"- Trechos transcritos: {len(self._segments)}",
+            "",
+            "## Quem falou",
+            "",
+        ]
+        for participante in participantes:
+            falas = "fala" if participante["segments"] == 1 else "falas"
+            linhas.append(
+                f"- **{participante['label']}** — {participante['segments']} {falas}, "
+                f"{_timestamp(participante['total_s'])} ({participante['origem']})"
+            )
+
+        linhas += ["", "## Como ler esta transcrição", ""]
+        linhas += [
+            "- O texto vem de reconhecimento automático de fala em português do "
+            "Brasil. Há palavras trocadas e frases cortadas: interprete pelo "
+            "contexto e trate trecho sem sentido como erro de transcrição.",
+            "- Trechos marcados com `(?)` tiveram baixa confiança do modelo.",
+        ]
+        if anonimos:
+            nomes = ", ".join(p["label"] for p in anonimos)
+            linhas.append(
+                f"- {nomes}: são pessoas distintas cujo nome não é conhecido. "
+                "Não deduza quem são nem atribua tarefas a elas por suposição — "
+                "registre o responsável como não identificado."
+            )
+        if nomeados:
+            linhas.append(
+                "- Os demais nomes acima são confiáveis: vieram de cadastro de voz "
+                "ou foram conferidos por quem gravou."
+            )
+        linhas.append(
+            "- Falas simultâneas não são separadas: quando duas pessoas falam ao "
+            "mesmo tempo, o trecho pode misturar as duas."
+        )
+
+        linhas += ["", "## Transcrição", ""]
+        for speaker, inicio, texto, incerto in self._agrupar(self.segments):
+            marca = " (?)" if incerto else ""
+            linhas.append(f"**[{_timestamp(inicio)}] {speaker}:** {texto}{marca}")
+            linhas.append("")
+        return "\n".join(linhas).rstrip() + "\n"
+
+    ORIGENS = {
+        "perfil": "voz reconhecida pelo cadastro",
+        "manual": "nome informado por quem gravou",
+        "cluster": "voz agrupada, sem nome",
+    }
+
+    def _resumo_participantes(self) -> list[dict[str, Any]]:
+        """Quem falou, quanto falou e de onde veio o nome.
+
+        Percorre os segmentos em vez da lista de vozes diarizadas porque quem
+        gravou também é participante — e costuma ser dono de tarefa na ata.
+        """
+        fontes = {f["label"]: f.get("source", "cluster") for f in self.speakers}
+        resumo: dict[str, dict[str, Any]] = {}
+        for segment in self._segments:
+            item = resumo.setdefault(
+                segment.speaker,
+                {"label": segment.speaker, "segments": 0, "total_s": 0.0, "tracks": set()},
+            )
+            item["segments"] += 1
+            item["total_s"] += segment.end_s - segment.start_s
+            item["tracks"].add(segment.track)
+
+        for item in resumo.values():
+            if item["label"] in fontes:
+                item["origem"] = self.ORIGENS.get(fontes[item["label"]], "voz agrupada")
+            elif item["tracks"] == {"microfone"}:
+                item["origem"] = "microfone de quem gravou"
+            else:
+                item["origem"] = "áudio dos participantes remotos, sem separação por pessoa"
+            item["total_s"] = round(item["total_s"], 2)
+            item.pop("tracks")
+        return sorted(resumo.values(), key=lambda item: -item["total_s"])
+
     def to_json(self) -> str:
         dados = {**self.snapshot(), "centroids": self.centroids}
         return json.dumps(dados, ensure_ascii=False, indent=2)
@@ -309,13 +405,16 @@ class Session:
         base = f"{self.iniciada_em.strftime('%Y-%m-%d_%H%M')}_{_slug(self.titulo)}"
         escritores = {
             "md": self.to_markdown, "txt": self.to_text,
-            "srt": self.to_srt, "json": self.to_json,
+            "srt": self.to_srt, "json": self.to_json, "claude": self.to_claude,
         }
+        # O arquivo para o Claude é markdown, mas com nome que o distingue do
+        # markdown de leitura — é ele que vai ser anexado na conversa.
+        sufixos = {"claude": "claude.md"}
         caminhos = []
         for formato in formatos:
             if formato not in escritores:
                 raise ValueError(f"formato desconhecido: {formato}")
-            caminho = destino / f"{base}.{formato}"
+            caminho = destino / f"{base}.{sufixos.get(formato, formato)}"
             caminho.write_text(escritores[formato](), encoding="utf-8")
             caminhos.append(caminho)
         return caminhos
@@ -352,6 +451,11 @@ class Session:
                 )
             anterior_fim = segment.end_s
         return blocos
+
+
+def _parece_anonimo(rotulo: str) -> bool:
+    """True para rótulos gerados pelo agrupamento ("Falante 2", "Participantes")."""
+    return bool(re.match(r"^(falante|speaker|participantes?)\b", rotulo.strip(), re.IGNORECASE))
 
 
 def _slug(texto: str) -> str:

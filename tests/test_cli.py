@@ -78,6 +78,7 @@ def gravar_diarizado(tmp_path, gerar_audio, escrever_wav, monkeypatch):
         "reuniao.wav",
     )
     monkeypatch.setenv("ESCRIBA_OUTPUT_DIR", str(tmp_path / "saida"))
+    monkeypatch.setenv("ESCRIBA_VOZES_STORE", str(tmp_path / "vozes.json"))
     monkeypatch.setenv("ESCRIBA_DIARIZACAO", "1")
     monkeypatch.setenv("ESCRIBA_DIARIZACAO_ENGINE", "mock")
     assert main(["--motor", "mock", "arquivo", str(caminho)]) == 0
@@ -149,7 +150,7 @@ def test_nomear_com_cadastro_alimenta_o_banco_de_vozes(
     )
     assert codigo == 0
 
-    vozes = json.loads((tmp_path / "saida" / "vozes.json").read_text(encoding="utf-8"))
+    vozes = json.loads((tmp_path / "vozes.json").read_text(encoding="utf-8"))
     nomes = {p["name"] for p in vozes["profiles"]}
     assert nomes == {"Ana Souza", "Carlos Pinto"}
     assert all(p["consent"] for p in vozes["profiles"])
@@ -159,6 +160,7 @@ def test_vozes_listar_e_remover(tmp_path, monkeypatch, capsys):
     from escriba.diarize import VoiceProfileStore
 
     monkeypatch.setenv("ESCRIBA_OUTPUT_DIR", str(tmp_path))
+    monkeypatch.setenv("ESCRIBA_VOZES_STORE", str(tmp_path / "vozes.json"))
     VoiceProfileStore(tmp_path / "vozes.json").add("Ana Souza", np.ones(16), consent=True)
 
     assert main(["vozes", "listar"]) == 0
@@ -174,6 +176,7 @@ def test_vozes_cadastrar_de_um_wav(tmp_path, gerar_audio, escrever_wav, monkeypa
         np.concatenate([silencio(0.8), fala(6.0, 180), silencio(0.8)]), "ana.wav"
     )
     monkeypatch.setenv("ESCRIBA_OUTPUT_DIR", str(tmp_path))
+    monkeypatch.setenv("ESCRIBA_VOZES_STORE", str(tmp_path / "vozes.json"))
     monkeypatch.setenv("ESCRIBA_DIARIZACAO_ENGINE", "mock")
 
     assert main(["vozes", "cadastrar", "Ana Souza", "--audio", str(caminho), "--sim"]) == 0
@@ -189,7 +192,65 @@ def test_cadastro_recusa_audio_sem_fala(tmp_path, gerar_audio, escrever_wav, mon
     _, silencio = gerar_audio
     caminho = escrever_wav(silencio(4.0), "mudo.wav")
     monkeypatch.setenv("ESCRIBA_OUTPUT_DIR", str(tmp_path))
+    monkeypatch.setenv("ESCRIBA_VOZES_STORE", str(tmp_path / "vozes.json"))
     monkeypatch.setenv("ESCRIBA_DIARIZACAO_ENGINE", "mock")
 
     assert main(["vozes", "cadastrar", "Ana", "--audio", str(caminho), "--sim"]) == 1
     assert "não encontrei fala" in capsys.readouterr().err
+
+
+def test_exportar_gera_arquivo_e_mostra_o_pedido(tmp_path, capsys):
+    from escriba.session import Session
+
+    session = Session("Kickoff")
+    session.registrar_falante("S1", "Ana Souza", source="manual")
+    session.add_segment(track="sistema", speaker="Ana Souza", speaker_id="S1",
+                        start_s=0, end_s=5, text="Eu confirmo o prazo até sexta.")
+    origem = tmp_path / "reuniao.json"
+    origem.write_text(session.to_json(), encoding="utf-8")
+
+    assert main(["exportar", str(origem)]) == 0
+
+    destino = tmp_path / "reuniao.claude.md"
+    assert destino.exists()
+    conteudo = destino.read_text(encoding="utf-8")
+    assert "Ana Souza" in conteudo and "## Quem falou" in conteudo
+
+    saida = capsys.readouterr().out
+    assert "Anexe esse arquivo" in saida
+    assert "Tarefa | Responsável | Prazo" in saida   # o pedido pronto para colar
+
+
+def test_exportar_aceita_destino_explicito(tmp_path):
+    from escriba.session import Session
+
+    session = Session("Kickoff")
+    session.add_segment(track="sistema", speaker="Participantes", start_s=0, end_s=3, text="oi")
+    origem = tmp_path / "r.json"
+    origem.write_text(session.to_json(), encoding="utf-8")
+    destino = tmp_path / "saida" / "para-claude.md"
+
+    assert main(["exportar", str(origem), "--saida", str(destino), "--sem-pedido"]) == 0
+    assert destino.exists()
+
+
+def test_exportar_recusa_transcricao_vazia(tmp_path, capsys):
+    from escriba.session import Session
+
+    origem = tmp_path / "vazia.json"
+    origem.write_text(Session("Nada").to_json(), encoding="utf-8")
+
+    assert main(["exportar", str(origem)]) == 1
+    assert "não tem trechos" in capsys.readouterr().err
+
+
+def test_gravacao_de_arquivo_ja_sai_pronta_para_o_claude(
+    tmp_path, gerar_audio, escrever_wav, monkeypatch
+):
+    fala, silencio = gerar_audio
+    caminho = escrever_wav(np.concatenate([silencio(0.8), fala(2.0), silencio(1.2)]), "r.wav")
+    saida = tmp_path / "saida"
+    monkeypatch.setenv("ESCRIBA_OUTPUT_DIR", str(saida))
+
+    assert main(["--motor", "mock", "arquivo", str(caminho)]) == 0
+    assert list(saida.glob("*.claude.md"))

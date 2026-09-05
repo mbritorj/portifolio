@@ -16,6 +16,7 @@ def cliente(tmp_path):
     config = AppConfig()
     config.asr.engine = "mock"
     config.output_dir = tmp_path
+    config.vozes.store = str(tmp_path / "vozes.json")
     app = criar_app(config)
     with TestClient(app) as cliente:
         cliente.app_state = app.state.escriba
@@ -178,3 +179,36 @@ def test_cadastro_de_voz_persiste_e_aparece_na_listagem(cliente):
 
 def test_listagem_de_vozes_vazia_quando_nao_ha_cadastro(cliente):
     assert cliente.get("/api/vozes").json() == {"vozes": []}
+
+
+def test_exportacao_para_o_claude_pela_api(cliente):
+    semear_falantes(cliente)
+    resposta = cliente.get("/api/exportar?formato=claude")
+    assert resposta.status_code == 200
+    assert "## Quem falou" in resposta.text
+    assert "Bom dia." in resposta.text
+
+
+def test_pedido_de_ata_esta_disponivel_para_copiar(cliente):
+    resposta = cliente.get("/api/pedido-ata")
+    assert resposta.status_code == 200
+    assert "Tarefa | Responsável | Prazo" in resposta.text
+    assert "não invente" in resposta.text.lower()
+
+
+def test_encerrar_salva_tambem_o_arquivo_do_claude(cliente):
+    """Ao encerrar, o arquivo para anexar no Claude já fica pronto em disco."""
+
+    class PipelineFalso:
+        rodando = False
+
+        def stop(self):
+            pass
+
+    semear_falantes(cliente)
+    cliente.app_state.pipeline = PipelineFalso()
+
+    arquivos = cliente.app_state.encerrar()
+
+    assert any(a.endswith(".claude.md") for a in arquivos)
+    assert any(a.endswith(".json") for a in arquivos)

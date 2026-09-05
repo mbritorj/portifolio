@@ -160,3 +160,67 @@ def test_parcial_carrega_o_falante():
     session.set_partial(track="sistema", speaker="Falante 1", speaker_id="S1",
                         start_s=1.0, text="bom di")
     assert session.partials[0]["speaker_id"] == "S1"
+
+
+# ----------------------------------------------------- exportação para o Claude
+
+
+def test_exportacao_para_claude_lista_quem_falou():
+    session = montar_com_falantes()
+    session.renomear_falante("S1", "Ana Souza")
+    session.add_segment(track="microfone", speaker="Eu", start_s=40, end_s=48,
+                        text="Eu fecho com a distribuidora até sexta.")
+
+    texto = session.to_claude()
+
+    assert "## Quem falou" in texto
+    assert "**Ana Souza**" in texto and "nome informado por quem gravou" in texto
+    # Quem gravou também é participante: costuma ser dono de tarefa na ata.
+    assert "**Eu**" in texto and "microfone de quem gravou" in texto
+    assert "## Transcrição" in texto
+    assert "Eu fecho com a distribuidora" in texto
+
+
+def test_exportacao_diz_quando_o_nome_veio_do_cadastro_de_voz():
+    session = Session("Reunião")
+    session.registrar_falante("S1", "Ana Souza", source="perfil", profile_id="ana-souza")
+    session.add_segment(track="sistema", speaker="Ana Souza", speaker_id="S1",
+                        start_s=0, end_s=6, text="Bom dia.")
+    assert "voz reconhecida pelo cadastro" in session.to_claude()
+
+
+def test_exportacao_avisa_sobre_vozes_sem_nome():
+    texto = montar_com_falantes().to_claude()
+    assert "Falante 1, Falante 2" in texto
+    assert "Não deduza quem são" in texto
+
+
+def test_exportacao_sem_anonimos_nao_traz_o_aviso():
+    session = Session("Reunião")
+    session.registrar_falante("S1", "Ana Souza", source="manual")
+    session.add_segment(track="sistema", speaker="Ana Souza", speaker_id="S1",
+                        start_s=0, end_s=5, text="Bom dia.")
+    assert "Não deduza quem são" not in session.to_claude()
+
+
+def test_exportacao_marca_trechos_de_baixa_confianca():
+    session = Session("Reunião")
+    session.add_segment(track="sistema", speaker="Participantes", start_s=0, end_s=4,
+                        text="prazo de doze semanas", avg_logprob=-1.8)
+    texto = session.to_claude()
+    assert "prazo de doze semanas (?)" in texto
+    assert "baixa confiança" in texto
+
+
+def test_exportacao_declara_a_origem_automatica():
+    """O modelo precisa saber que o texto tem erro de reconhecimento."""
+    texto = montar_com_falantes().to_claude()
+    assert "reconhecimento automático" in texto
+    assert "Falas simultâneas não são separadas" in texto
+
+
+def test_salvar_gera_o_arquivo_do_claude_com_nome_proprio(tmp_path):
+    caminhos = montar_com_falantes().salvar(tmp_path, formatos=("md", "claude"))
+    nomes = [c.name for c in caminhos]
+    assert any(n.endswith(".claude.md") for n in nomes)
+    assert any(n.endswith(".md") and not n.endswith(".claude.md") for n in nomes)

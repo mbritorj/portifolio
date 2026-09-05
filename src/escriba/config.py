@@ -108,8 +108,11 @@ class VozesConfig:
     """Cadastro de vozes: dá nome automático a quem já foi cadastrado."""
 
     enabled: bool = True
-    # Relativo a ``output_dir`` quando não for um caminho absoluto.
-    store: str = "vozes.json"
+    # Vazio significa o padrão: ~/.config/escriba/vozes.json. O cadastro é dado
+    # biométrico e vida longa — deixá-lo dentro da pasta de transcrições faria
+    # com que compartilhar a ata de uma reunião levasse junto as impressões
+    # vocais de todo mundo. Um caminho relativo aqui resolve contra output_dir.
+    store: str = ""
     # Limiar mais alto que o do agrupamento: pôr o nome errado em alguém é um
     # erro pior do que deixar como "Falante 2".
     threshold: float = 0.62
@@ -156,8 +159,14 @@ class AppConfig:
         return config
 
     def caminho_vozes(self) -> Path:
-        """Onde fica o cadastro de vozes, resolvido contra ``output_dir``."""
-        caminho = Path(self.vozes.store)
+        """Onde fica o cadastro de vozes.
+
+        Fora da pasta de transcrições por padrão: as impressões vocais não podem
+        viajar junto quando alguém compacta e envia as atas de uma reunião.
+        """
+        if not self.vozes.store:
+            return _diretorio_de_config() / "vozes.json"
+        caminho = Path(self.vozes.store).expanduser()
         return caminho if caminho.is_absolute() else self.output_dir / caminho
 
 
@@ -191,6 +200,11 @@ def _coerce(annotation: Any, value: Any) -> Any:
     if "Path" in text and not isinstance(value, Path):
         return Path(value)
     return value
+
+
+def _diretorio_de_config() -> Path:
+    base = os.environ.get("XDG_CONFIG_HOME")
+    return (Path(base) if base else Path.home() / ".config") / "escriba"
 
 
 def _bool_env(valor: str) -> bool:

@@ -27,14 +27,14 @@
     border-bottom: 1px solid var(--borda); padding: 12px 20px;
     display: flex; gap: 12px; align-items: center; flex-wrap: wrap;
   }
-  h1 { font-size: 16px; margin: 0 12px 0 0; letter-spacing: -.01em; }
+  h1 { font-size: 16px; margin: 0 6px 0 0; letter-spacing: -.01em; white-space: nowrap; }
   h1 span { color: var(--suave); font-weight: 400; }
   input[type=text] {
-    flex: 1 1 220px; min-width: 160px; padding: 8px 10px; border-radius: 8px;
+    flex: 1 1 170px; min-width: 140px; padding: 8px 10px; border-radius: 8px;
     border: 1px solid var(--borda); background: var(--fundo); color: var(--texto); font: inherit;
   }
   button {
-    padding: 8px 14px; border-radius: 8px; border: 1px solid var(--borda);
+    padding: 8px 12px; border-radius: 8px; border: 1px solid var(--borda);
     background: var(--fundo); color: var(--texto); font: inherit; cursor: pointer;
   }
   button:hover:not(:disabled) { border-color: var(--suave); }
@@ -72,6 +72,19 @@
   .linha.parcial { opacity: .62; font-style: italic; border-bottom: 1px dashed var(--borda); }
   .incerto { border-left: 2px solid var(--alerta); padding-left: 8px; margin-left: -10px; }
   .vazio { color: var(--suave); padding: 40px 0; text-align: center; }
+  #pedido {
+    margin-top: 24px; padding: 18px 20px; background: var(--painel);
+    border: 1px solid var(--borda); border-radius: 12px; box-shadow: var(--sombra);
+  }
+  #pedido h2 { margin-top: 0; font-size: 15px; }
+  #pedido ol { margin: 0 0 14px; padding-left: 20px; color: var(--suave); }
+  #pedido code { background: var(--fundo); padding: 1px 5px; border-radius: 4px; }
+  #pedido textarea {
+    width: 100%; padding: 12px; border-radius: 8px; border: 1px solid var(--borda);
+    background: var(--fundo); color: var(--texto); font: 13px/1.5 ui-monospace,
+    SFMono-Regular, Menlo, monospace; resize: vertical;
+  }
+  #pedido .acoes { display: flex; gap: 8px; margin-top: 12px; }
   #ata {
     margin-top: 28px; padding: 18px 20px; background: var(--painel);
     border: 1px solid var(--borda); border-radius: 12px; box-shadow: var(--sombra);
@@ -88,8 +101,9 @@
   <input type="text" id="titulo" placeholder="Título da reunião" autocomplete="off">
   <button id="iniciar" class="primario">Iniciar</button>
   <button id="encerrar" disabled>Encerrar</button>
+  <button id="paraClaude" class="primario">Para o Claude</button>
   <button id="baixar">Baixar .md</button>
-  <button id="gerarAta">Gerar ata</button>
+  <button id="gerarAta">Ata automática</button>
 </header>
 
 <main>
@@ -104,6 +118,20 @@
   <div class="falantes" id="falantes"></div>
 
   <div id="transcricao"><p class="vazio">A transcrição aparece aqui assim que a reunião começa.</p></div>
+  <div id="pedido" hidden>
+    <h2>Levar para o Claude</h2>
+    <ol>
+      <li>O arquivo <code id="nomeArquivo">transcricao.claude.md</code> foi baixado.</li>
+      <li>Abra uma conversa no Claude e anexe esse arquivo.</li>
+      <li>Cole o pedido abaixo.</li>
+    </ol>
+    <textarea id="textoPedido" readonly rows="12"></textarea>
+    <div class="acoes">
+      <button id="copiarPedido" class="primario">Copiar pedido</button>
+      <button id="fecharPedido">Fechar</button>
+    </div>
+  </div>
+
   <div id="ata" hidden></div>
 </main>
 
@@ -381,6 +409,7 @@ $("iniciar").onclick = async () => {
     coresPorFalante.clear();
     desenharFalantes([]);
     $("ata").hidden = true;
+    $("pedido").hidden = true;
     await chamar("/api/iniciar", { titulo: $("titulo").value.trim() || null });
   } catch (erro) {
     $("mensagem").textContent = erro.message;
@@ -399,13 +428,54 @@ $("encerrar").onclick = async () => {
 
 $("baixar").onclick = async () => {
   const texto = await (await fetch("/api/exportar?formato=md")).text();
-  const url = URL.createObjectURL(new Blob([texto], { type: "text/markdown" }));
+  baixar(texto, nomeBase() + ".md", "text/markdown");
+};
+
+function nomeBase() {
+  const titulo = $("titulo").value.trim() || "reuniao";
+  return titulo.normalize("NFKD").replace(/[^\w\s-]/g, "").trim().replace(/\s+/g, "-").toLowerCase();
+}
+
+function baixar(texto, nome, tipo) {
+  const url = URL.createObjectURL(new Blob([texto], { type: tipo }));
   const link = document.createElement("a");
   link.href = url;
-  link.download = ($("titulo").value.trim() || "reuniao") + ".md";
+  link.download = nome;
   link.click();
   URL.revokeObjectURL(url);
+}
+
+$("paraClaude").onclick = async () => {
+  $("mensagem").textContent = "";
+  try {
+    const [transcricao, pedido] = await Promise.all([
+      fetch("/api/exportar?formato=claude").then((r) => r.text()),
+      fetch("/api/pedido-ata").then((r) => r.text()),
+    ]);
+    const nome = nomeBase() + ".claude.md";
+    baixar(transcricao, nome, "text/markdown");
+    $("nomeArquivo").textContent = nome;
+    $("textoPedido").value = pedido;
+    $("pedido").hidden = false;
+    $("pedido").scrollIntoView({ behavior: "smooth", block: "nearest" });
+  } catch (erro) {
+    $("mensagem").textContent = erro.message;
+  }
 };
+
+$("copiarPedido").onclick = async () => {
+  const area = $("textoPedido");
+  try {
+    await navigator.clipboard.writeText(area.value);
+    $("copiarPedido").textContent = "copiado";
+    setTimeout(() => ($("copiarPedido").textContent = "Copiar pedido"), 1800);
+  } catch (erro) {
+    // Sem permissão de área de transferência: seleciona para o Ctrl+C manual.
+    area.select();
+  }
+};
+
+$("fecharPedido").onclick = () => { $("pedido").hidden = true; };
 
 $("gerarAta").onclick = async () => {
   $("gerarAta").disabled = true;

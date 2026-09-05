@@ -27,7 +27,7 @@ from .config import AppConfig
 from .diarize import ConsentimentoAusente, VoiceProfileStore
 from .pipeline import TranscriptionPipeline
 from .session import Session
-from .summarize import SummaryError, gerar_ata
+from .summarize import PEDIDO_ATA, SummaryError, gerar_ata
 
 logger = logging.getLogger(__name__)
 
@@ -147,7 +147,9 @@ class AppState:
             raise RuntimeError("nenhuma gravação em andamento.")
         self.pipeline.stop()
         self.pipeline = None
-        caminhos = self.session.salvar(self.config.output_dir, formatos=("md", "json", "txt"))
+        caminhos = self.session.salvar(
+            self.config.output_dir, formatos=("md", "json", "txt", "claude")
+        )
         return [str(caminho) for caminho in caminhos]
 
 
@@ -246,10 +248,16 @@ def criar_app(config: AppConfig) -> Any:
         exportadores = {
             "md": estado.session.to_markdown, "txt": estado.session.to_text,
             "srt": estado.session.to_srt, "json": estado.session.to_json,
+            "claude": estado.session.to_claude,
         }
         if formato not in exportadores:
             raise HTTPException(status_code=400, detail=f"formato inválido: {formato}")
         return exportadores[formato]()
+
+    @app.get("/api/pedido-ata", response_class=PlainTextResponse)
+    async def pedido_ata() -> str:
+        """Texto para colar no Claude junto com o arquivo exportado."""
+        return PEDIDO_ATA
 
     @app.post("/api/ata")
     async def ata(payload: dict | None = None) -> dict:
