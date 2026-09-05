@@ -1,0 +1,320 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Escriba — transcrição ao vivo</title>
+<style>
+  :root {
+    --fundo: #f7f7f5; --painel: #ffffff; --borda: #e2e0da; --texto: #1f1e1b;
+    --suave: #6b6862; --destaque: #b4552d; --eu: #2f6f5e; --outros: #3a5a94;
+    --alerta: #a3341f; --sombra: 0 1px 2px rgba(0,0,0,.05), 0 8px 24px rgba(0,0,0,.04);
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --fundo: #17171a; --painel: #1f1f23; --borda: #33333a; --texto: #eceae5;
+      --suave: #9a978f; --destaque: #e08a5f; --eu: #6fc0a8; --outros: #8fb0e6;
+      --alerta: #e3806c; --sombra: none;
+    }
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--fundo); color: var(--texto);
+    font: 15px/1.55 ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  }
+  header {
+    position: sticky; top: 0; z-index: 5; background: var(--painel);
+    border-bottom: 1px solid var(--borda); padding: 12px 20px;
+    display: flex; gap: 12px; align-items: center; flex-wrap: wrap;
+  }
+  h1 { font-size: 16px; margin: 0 12px 0 0; letter-spacing: -.01em; }
+  h1 span { color: var(--suave); font-weight: 400; }
+  input[type=text] {
+    flex: 1 1 220px; min-width: 160px; padding: 8px 10px; border-radius: 8px;
+    border: 1px solid var(--borda); background: var(--fundo); color: var(--texto); font: inherit;
+  }
+  button {
+    padding: 8px 14px; border-radius: 8px; border: 1px solid var(--borda);
+    background: var(--fundo); color: var(--texto); font: inherit; cursor: pointer;
+  }
+  button:hover:not(:disabled) { border-color: var(--suave); }
+  button:disabled { opacity: .45; cursor: not-allowed; }
+  button.primario { background: var(--destaque); border-color: var(--destaque); color: #fff; }
+  main { max-width: 900px; margin: 0 auto; padding: 20px; }
+  .barra {
+    display: flex; gap: 18px; flex-wrap: wrap; align-items: center;
+    color: var(--suave); font-size: 13px; margin-bottom: 16px;
+  }
+  .pulso { width: 9px; height: 9px; border-radius: 50%; background: var(--suave); display: inline-block; }
+  .pulso.ativo { background: var(--alerta); animation: pisca 1.6s ease-in-out infinite; }
+  @keyframes pisca { 50% { opacity: .25; } }
+  .linha {
+    display: grid; grid-template-columns: 62px 1fr; gap: 12px;
+    padding: 10px 0; border-bottom: 1px solid var(--borda);
+  }
+  .hora { color: var(--suave); font-variant-numeric: tabular-nums; font-size: 13px; padding-top: 2px; }
+  .falante { font-weight: 600; margin-right: 6px; }
+  .falante.microfone { color: var(--eu); }
+  .falante.sistema { color: var(--outros); }
+  .linha.parcial { opacity: .62; font-style: italic; border-bottom: 1px dashed var(--borda); }
+  .incerto { border-left: 2px solid var(--alerta); padding-left: 8px; margin-left: -10px; }
+  .vazio { color: var(--suave); padding: 40px 0; text-align: center; }
+  #ata {
+    margin-top: 28px; padding: 18px 20px; background: var(--painel);
+    border: 1px solid var(--borda); border-radius: 12px; box-shadow: var(--sombra);
+    white-space: pre-wrap;
+  }
+  #ata h2 { margin-top: 0; font-size: 15px; }
+  .erro { color: var(--alerta); }
+  footer { color: var(--suave); font-size: 12px; padding: 0 20px 32px; text-align: center; }
+</style>
+</head>
+<body>
+<header>
+  <h1>Escriba <span>· transcrição ao vivo</span></h1>
+  <input type="text" id="titulo" placeholder="Título da reunião" autocomplete="off">
+  <button id="iniciar" class="primario">Iniciar</button>
+  <button id="encerrar" disabled>Encerrar</button>
+  <button id="baixar">Baixar .md</button>
+  <button id="gerarAta">Gerar ata</button>
+</header>
+
+<main>
+  <div class="barra">
+    <span><i class="pulso" id="pulso"></i> <span id="estado">parado</span></span>
+    <span id="duracao">00:00:00</span>
+    <span id="contagem">0 trechos</span>
+    <span id="desempenho"></span>
+    <span id="mensagem" class="erro"></span>
+  </div>
+
+  <div id="transcricao"><p class="vazio">A transcrição aparece aqui assim que a reunião começa.</p></div>
+  <div id="ata" hidden></div>
+</main>
+
+<footer>Áudio capturado e transcrito nesta máquina. Avise os participantes antes de gravar.</footer>
+
+<script>
+const $ = (id) => document.getElementById(id);
+const transcricao = $("transcricao");
+const parciais = new Map();   // trilha -> elemento da hipótese em andamento
+let gravando = false;
+let inicioMs = null;
+
+function hhmmss(segundos) {
+  const total = Math.max(0, Math.floor(segundos));
+  const h = String(Math.floor(total / 3600)).padStart(2, "0");
+  const m = String(Math.floor((total % 3600) / 60)).padStart(2, "0");
+  const s = String(total % 60).padStart(2, "0");
+  return `${h}:${m}:${s}`;
+}
+
+function limparVazio() {
+  const vazio = transcricao.querySelector(".vazio");
+  if (vazio) vazio.remove();
+}
+
+function montarLinha({ hora, trilha, falante, texto, parcial, incerto }) {
+  const linha = document.createElement("div");
+  linha.className = "linha" + (parcial ? " parcial" : "");
+  const coluna = document.createElement("div");
+  coluna.className = "hora";
+  coluna.textContent = hora;
+  const corpo = document.createElement("div");
+  if (incerto) corpo.className = "incerto";
+  const nome = document.createElement("span");
+  nome.className = "falante " + (trilha === "microfone" ? "microfone" : "sistema");
+  nome.textContent = falante + ":";
+  corpo.append(nome, document.createTextNode(texto));
+  linha.append(coluna, corpo);
+  return linha;
+}
+
+function noFim() {
+  return window.innerHeight + window.scrollY >= document.body.offsetHeight - 120;
+}
+
+function aplicarSegmento(evento) {
+  limparVazio();
+  const anterior = parciais.get(evento.track);
+  if (anterior) { anterior.remove(); parciais.delete(evento.track); }
+  const colar = noFim();
+  transcricao.append(montarLinha({
+    hora: evento.start_label, trilha: evento.track, falante: evento.speaker,
+    texto: evento.text, parcial: false, incerto: evento.low_confidence,
+  }));
+  if (colar) window.scrollTo(0, document.body.scrollHeight);
+}
+
+function aplicarParcial(evento) {
+  const antiga = parciais.get(evento.track);
+  if (antiga) antiga.remove();
+  parciais.delete(evento.track);
+  if (!evento.text) return;
+  limparVazio();
+  const colar = noFim();
+  const linha = montarLinha({
+    hora: hhmmss(evento.start_s), trilha: evento.track, falante: evento.speaker,
+    texto: evento.text, parcial: true, incerto: false,
+  });
+  transcricao.append(linha);
+  parciais.set(evento.track, linha);
+  if (colar) window.scrollTo(0, document.body.scrollHeight);
+}
+
+function atualizarContagem() {
+  const total = transcricao.querySelectorAll(".linha:not(.parcial)").length;
+  $("contagem").textContent = `${total} ${total === 1 ? "trecho" : "trechos"}`;
+}
+
+function definirEstado(rotulo, ativo) {
+  $("estado").textContent = rotulo;
+  $("pulso").classList.toggle("ativo", ativo);
+  gravando = ativo;
+  $("iniciar").disabled = ativo;
+  $("encerrar").disabled = !ativo;
+}
+
+function desenharSnapshot(dados) {
+  transcricao.innerHTML = "";
+  parciais.clear();
+  if (!dados.segments.length) {
+    transcricao.innerHTML = '<p class="vazio">A transcrição aparece aqui assim que a reunião começa.</p>';
+  }
+  dados.segments.forEach(aplicarSegmento);
+  // Quem abre a página no meio da reunião também vê a fala em andamento.
+  (dados.partials || []).forEach(aplicarParcial);
+  if (dados.gravando) {
+    definirEstado("gravando", true);
+    inicioMs = Date.now() - dados.duracao_s * 1000;
+  }
+  if (dados.ata) mostrarAta(dados.ata);
+  atualizarContagem();
+}
+
+// Plano B para quando o WebSocket não sobe (uvicorn instalado sem os extras, um
+// proxy que corta o upgrade). A página fica mais lenta, mas continua servindo.
+let consulta = null;
+
+function iniciarConsulta() {
+  if (consulta) return;
+  $("mensagem").textContent = "sem conexão ao vivo — atualizando a cada 2 s";
+  consulta = setInterval(async () => {
+    try {
+      desenharSnapshot(await (await fetch("/api/estado")).json());
+    } catch (erro) {
+      /* servidor fora do ar; a próxima tentativa resolve */
+    }
+  }, 2000);
+}
+
+function pararConsulta() {
+  if (!consulta) return;
+  clearInterval(consulta);
+  consulta = null;
+  $("mensagem").textContent = "";
+}
+
+function conectar() {
+  const ws = new WebSocket(`ws://${location.host}/ws`);
+  ws.onopen = pararConsulta;
+  ws.onmessage = (mensagem) => {
+    const evento = JSON.parse(mensagem.data);
+    if (evento.type === "snapshot") {
+      desenharSnapshot(evento);
+    } else if (evento.type === "segment") {
+      aplicarSegmento(evento);
+    } else if (evento.type === "partial") {
+      aplicarParcial(evento);
+    } else if (evento.type === "status") {
+      if (evento.state === "loading_model") definirEstado("carregando modelo…", false);
+      if (evento.state === "recording") { definirEstado("gravando", true); inicioMs = Date.now(); }
+      if (evento.state === "stopped") {
+        definirEstado("encerrado", false);
+        const s = evento.stats || {};
+        if (s.audio_transcrito_s) {
+          const fator = (s.tempo_inferencia_s / s.audio_transcrito_s).toFixed(2);
+          $("desempenho").textContent = `${fator}× tempo real`;
+        }
+      }
+    } else if (evento.type === "error") {
+      $("mensagem").textContent = evento.message;
+    }
+    atualizarContagem();
+  };
+  ws.onclose = () => {
+    iniciarConsulta();
+    setTimeout(conectar, 2000);
+  };
+}
+
+async function chamar(caminho, corpo) {
+  const resposta = await fetch(caminho, {
+    method: "POST", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(corpo || {}),
+  });
+  const dados = await resposta.json().catch(() => ({}));
+  if (!resposta.ok) throw new Error(dados.detail || resposta.statusText);
+  return dados;
+}
+
+function mostrarAta(markdown) {
+  const painel = $("ata");
+  painel.hidden = false;
+  painel.textContent = markdown;
+}
+
+$("iniciar").onclick = async () => {
+  $("mensagem").textContent = "";
+  try {
+    transcricao.innerHTML = '<p class="vazio">Aguardando fala…</p>';
+    parciais.clear();
+    $("ata").hidden = true;
+    await chamar("/api/iniciar", { titulo: $("titulo").value.trim() || null });
+  } catch (erro) {
+    $("mensagem").textContent = erro.message;
+    definirEstado("parado", false);
+  }
+};
+
+$("encerrar").onclick = async () => {
+  try {
+    const dados = await chamar("/api/encerrar");
+    $("mensagem").textContent = "salvo em " + dados.arquivos.join(", ");
+  } catch (erro) {
+    $("mensagem").textContent = erro.message;
+  }
+};
+
+$("baixar").onclick = async () => {
+  const texto = await (await fetch("/api/exportar?formato=md")).text();
+  const url = URL.createObjectURL(new Blob([texto], { type: "text/markdown" }));
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = ($("titulo").value.trim() || "reuniao") + ".md";
+  link.click();
+  URL.revokeObjectURL(url);
+};
+
+$("gerarAta").onclick = async () => {
+  $("gerarAta").disabled = true;
+  $("mensagem").textContent = "gerando ata…";
+  try {
+    const dados = await chamar("/api/ata");
+    mostrarAta(dados.ata);
+    $("mensagem").textContent = "";
+  } catch (erro) {
+    $("mensagem").textContent = erro.message;
+  } finally {
+    $("gerarAta").disabled = false;
+  }
+};
+
+setInterval(() => {
+  if (gravando && inicioMs) $("duracao").textContent = hhmmss((Date.now() - inicioMs) / 1000);
+}, 1000);
+
+conectar();
+</script>
+</body>
+</html>

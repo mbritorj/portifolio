@@ -1,0 +1,54 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "escriba"
+version = "0.1.0"
+description = "Transcrição de reuniões em tempo real (pt-BR) sem bots na sala: Teams, Webex, Meet e qualquer outro aplicativo."
+readme = "README.md"
+requires-python = ">=3.11"
+license = { text = "MIT" }
+keywords = ["transcrição", "reuniões", "whisper", "teams", "webex", "meet", "pt-BR"]
+classifiers = [
+  "Development Status :: 3 - Alpha",
+  "Natural Language :: Portuguese (Brazilian)",
+  "Programming Language :: Python :: 3.11",
+  "Topic :: Multimedia :: Sound/Audio :: Speech",
+]
+dependencies = [
+  "numpy>=1.24",
+  "sounddevice>=0.4.6",
+]
+
+[project.optional-dependencies]
+# Transcrição local (o padrão). Em GPU NVIDIA, instale também nvidia-cublas/cudnn
+# conforme a documentação do faster-whisper.
+local = ["faster-whisper>=1.0", "scipy>=1.11"]
+# Interface web ao vivo.
+web = ["fastapi>=0.110", "uvicorn[standard]>=0.27", "websockets>=12"]
+# Ata e itens de ação via Claude API.
+ata = ["anthropic>=1.0"]
+# Loopback nativo no Windows.
+windows = ["PyAudioWPatch>=0.2.12"]
+dev = ["pytest>=8", "ruff>=0.4"]
+
+[project.scripts]
+escriba = "escriba.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+escriba = ["web/*.html"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B"]

@@ -1,0 +1,39 @@
+# Copie para escriba.toml e ajuste. Todos os campos são opcionais;
+# o que não estiver aqui usa o padrão de src/escriba/config.py.
+
+output_dir = "transcricoes"
+mic_label = "Eu"
+system_label = "Participantes"
+
+[audio]
+# Deixe comentado para detecção automática. Aceita índice ou trecho do nome
+# (veja `escriba dispositivos`).
+# system_device = "alsa_output.pci-0000_00_1f.3.analog-stereo.monitor"
+# mic_device = "Yeti"
+capture_mic = true
+capture_system = true
+backend = "auto"       # auto | wasapi | portaudio
+
+[vad]
+# Aumente a margem se o ruído da sala estiver abrindo falas fantasma;
+# diminua se falas baixas estiverem passando batido.
+speech_margin_db = 9.0
+hangover_ms = 700
+min_utterance_ms = 400
+
+[asr]
+engine = "faster-whisper"
+# large-v3 é o melhor em português; em CPU sem GPU, "small" roda em tempo real.
+model = "large-v3"
+device = "auto"        # auto | cuda | cpu
+compute_type = "auto"  # auto | float16 | int8_float16 | int8
+language = "pt"
+partial_interval_s = 1.2
+
+[summary]
+enabled = true
+model = "claude-opus-5"
+
+[server]
+host = "127.0.0.1"
+port = 8777
