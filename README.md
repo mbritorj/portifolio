@@ -83,6 +83,9 @@ pip install -e ".[local,web,diarizacao]"             # com separação de vozes
 pip install -e ".[local,web,diarizacao,ata]"         # com ata pela Claude API
 ```
 
+No macOS há um script que faz tudo isso e mais o modelo de voz e a configuração
+inicial: `./instalar-macos.sh` (veja [`docs/macos.md`](docs/macos.md)).
+
 No Windows, some `[windows]` para o loopback nativo:
 
 ```bash

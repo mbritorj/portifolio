@@ -7,6 +7,26 @@ passa por ele, e o Escriba grava dali.
 
 Testado em Apple Silicon (M1 em diante). Em Mac Intel o caminho é o mesmo.
 
+## Caminho curto: o script de instalação
+
+O repositório traz um script que faz tudo o que dá para automatizar — dependências,
+ambiente virtual, pacote, modelo de voz, configuração e autoteste:
+
+```bash
+git clone -b claude/meeting-transcription-assistant-yf2grq \
+  https://github.com/mbritorj/portifolio.git escriba
+cd escriba
+./instalar-macos.sh
+```
+
+Ele pergunta antes de instalar qualquer coisa, pode ser rodado de novo sem estragar nada
+(não sobrescreve o `escriba.toml` nem rebaixa o que já existe) e termina imprimindo os
+dois passos que dependem da interface gráfica: o dispositivo de multi-saída e a
+permissão de microfone.
+
+O resto desta página explica cada passo, para quem prefere fazer à mão ou precisa
+entender o que o script fez.
+
 ## 1. Dependências
 
 ```bash
