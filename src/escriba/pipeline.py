@@ -259,6 +259,13 @@ class TranscriptionPipeline:
         ultima_parcial = 0.0
         intervalo = self.config.asr.partial_interval_s
         minimo = self.config.asr.partial_min_audio_s
+        # Silêncio digital absoluto: o dispositivo existe e entrega blocos, mas
+        # todos zerados. É o que acontece quando o macOS nega o microfone ao
+        # terminal ou quando a saída não está roteada para o dispositivo virtual
+        # — e, sem este aviso, a tela fica vazia sem nenhuma explicação.
+        blocos_mudos = 0
+        avisou_mudo = False
+        limite_mudo = max(1, int(10_000 / self.config.audio.block_ms))
 
         try:
             for bloco in track.source.blocks():
@@ -269,6 +276,23 @@ class TranscriptionPipeline:
                     # trilha; sem isso as duas trilhas ficam em relógios distintos.
                     offset = time.monotonic() - self._t0
                 self.stats.blocos += 1
+
+                if not avisou_mudo:
+                    blocos_mudos = 0 if bloco.any() else blocos_mudos + 1
+                    if blocos_mudos >= limite_mudo:
+                        avisou_mudo = True
+                        self._emit(
+                            {
+                                "type": "error",
+                                "track": track.name,
+                                "message": (
+                                    f"a trilha {track.name!r} está em silêncio absoluto há "
+                                    "10 s. Confira a permissão de microfone do terminal e se "
+                                    "o áudio da reunião está sendo roteado para o dispositivo "
+                                    "escolhido."
+                                ),
+                            }
+                        )
 
                 for utterance in vad.process(bloco):
                     self._enfileirar_final(track, utterance, offset)

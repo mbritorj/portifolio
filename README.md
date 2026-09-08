@@ -130,13 +130,16 @@ privilegiada. O caminho prático é um driver virtual:
 brew install blackhole-2ch
 ```
 
-Depois, no **Configuração de Áudio e MIDI**, crie um *dispositivo agregado* com o
-BlackHole **e** a sua saída normal, e use-o como saída do sistema — assim o Escriba
+Depois, no **Configuração de Áudio e MIDI**, crie um *dispositivo de multi-saída* com o
+BlackHole **e** a sua saída normal, e escolha-o como saída do sistema — assim o Escriba
 grava e você continua ouvindo a reunião. Aponte a captura para o BlackHole:
 
 ```bash
 escriba --config escriba.toml servir     # com system_device = "BlackHole"
 ```
+
+O passo a passo completo, com permissão de microfone, escolha de modelo em Apple Silicon
+e os problemas mais comuns, está em [`docs/macos.md`](docs/macos.md).
 
 ---
 

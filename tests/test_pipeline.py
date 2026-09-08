@@ -362,3 +362,39 @@ def test_encerrar_com_fila_cheia_transcreve_o_que_faltava(gerar_audio, escrever_
     assert len(pipeline.session.segments) == 5   # nenhuma fala perdida no fim
     assert not [e for e in eventos if e["type"] == "error"]
     assert eventos[-1]["state"] == "stopped"
+
+
+def test_trilha_muda_avisa_em_vez_de_ficar_calada(escrever_wav):
+    """Silêncio digital absoluto é falha de permissão ou de roteamento.
+
+    No macOS é o sintoma de terminal sem acesso ao microfone: o dispositivo
+    entrega blocos, todos zerados, e a tela ficaria vazia sem explicação.
+    """
+    import numpy as np
+
+    caminho = escrever_wav(np.zeros(16_000 * 12, dtype=np.float32), "mudo.wav")
+    config = montar_config()
+    eventos: list[dict] = []
+    pipeline = TranscriptionPipeline(
+        config, transcriber=MockTranscriber(config.asr), on_event=eventos.append
+    )
+    pipeline.add_track("sistema", "Participantes", WavFileSource(caminho))
+    pipeline.run_until_complete()
+
+    avisos = [e for e in eventos if e["type"] == "error" and "silêncio absoluto" in e["message"]]
+    assert len(avisos) == 1   # avisa uma vez, não a cada bloco
+    assert "permissão de microfone" in avisos[0]["message"]
+
+
+def test_audio_com_ruido_nao_dispara_o_aviso_de_mudo(gerar_audio, escrever_wav):
+    _, silencio = gerar_audio
+    caminho = escrever_wav(silencio(12.0), "ruido.wav")
+    config = montar_config()
+    eventos: list[dict] = []
+    pipeline = TranscriptionPipeline(
+        config, transcriber=MockTranscriber(config.asr), on_event=eventos.append
+    )
+    pipeline.add_track("sistema", "Participantes", WavFileSource(caminho))
+    pipeline.run_until_complete()
+
+    assert not [e for e in eventos if e["type"] == "error"]

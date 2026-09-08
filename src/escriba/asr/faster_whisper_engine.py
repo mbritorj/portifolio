@@ -8,7 +8,6 @@ de ela começar.
 from __future__ import annotations
 
 import logging
-import platform
 
 import numpy as np
 
@@ -54,9 +53,10 @@ class FasterWhisperTranscriber(Transcriber):
             if device == "cuda":
                 compute_type = "float16"
             else:
-                # int8 é o que torna o modelo utilizável em CPU; em Apple Silicon
-                # float32 costuma render mais que a quantização.
-                compute_type = "float32" if platform.machine() == "arm64" else "int8"
+                # int8 é o que torna o modelo utilizável em CPU. Em Apple Silicon
+                # o ganho da quantização varia com o modelo e a geração do chip:
+                # se ficar lento, meça também com compute_type = "float32".
+                compute_type = "int8"
         return device, compute_type
 
     def warmup(self) -> None:

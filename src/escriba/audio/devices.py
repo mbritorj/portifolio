@@ -159,8 +159,9 @@ def _mensagem_sem_loopback() -> str:
     if sistema == "Darwin":
         return (
             "Nenhum loopback encontrado. No macOS, instale o BlackHole "
-            "('brew install blackhole-2ch') e crie um dispositivo agregado com "
-            "BlackHole + sua saída, para gravar e continuar ouvindo a reunião."
+            "('brew install blackhole-2ch') e crie um dispositivo de multi-saída "
+            "com BlackHole + sua saída, para gravar e continuar ouvindo a reunião. "
+            "Passo a passo em docs/macos.md."
         )
     return (
         "Nenhum monitor encontrado. No Linux, confira se o PulseAudio/PipeWire "
