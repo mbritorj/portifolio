@@ -38,8 +38,13 @@ multi-saída. Você continua ouvindo; o Escriba lê do BlackHole.
 
 ## 3. Instalar o Escriba
 
+Rode os comandos **um de cada vez** e confira o resultado de cada um: se o `git clone`
+falhar, os seguintes vão rodar na pasta errada.
+
 ```bash
-git clone <este-repositório> escriba && cd escriba
+git clone -b claude/meeting-transcription-assistant-yf2grq \
+  https://github.com/mbritorj/portifolio.git escriba
+cd escriba
 python3.12 -m venv .venv && source .venv/bin/activate
 pip install -e ".[local,web,diarizacao]"      # acrescente ,ata para a ata pela API
 escriba autoteste                              # valida sem microfone e sem modelo

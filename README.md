@@ -69,8 +69,14 @@ em [`docs/plataformas.md`](docs/plataformas.md).
 
 ## Instalação
 
+> O código ainda vive na branch `claude/meeting-transcription-assistant-yf2grq`; por
+> isso o `-b` no comando abaixo. Depois de mesclar na `master`, ele deixa de ser
+> necessário.
+
 ```bash
-git clone <este-repositório> && cd portifolio
+git clone -b claude/meeting-transcription-assistant-yf2grq \
+  https://github.com/mbritorj/portifolio.git escriba
+cd escriba
 python -m venv .venv && source .venv/bin/activate   # Windows: .venv\Scripts\activate
 pip install -e ".[local,web]"                        # transcrição local + interface web
 pip install -e ".[local,web,diarizacao]"             # com separação de vozes
