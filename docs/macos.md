@@ -59,10 +59,23 @@ reunião**. Para os dois ao mesmo tempo, crie um dispositivo de **multi-saída**
 Depois, em **Ajustes do Sistema → Som → Saída**, escolha esse dispositivo de
 multi-saída. Você continua ouvindo; o Escriba lê do BlackHole.
 
-**Confira na coluna `Type` dessa mesma tela**: precisa dizer *Multi-Output Device*. Se
-disser *Aggregate device*, foi criado o dispositivo errado — o agregado distribui canais
-(1-2 para os alto-falantes, 3-4 para o BlackHole) em vez de duplicar o áudio, e o
-BlackHole não recebe nada. Apague-o com o `−` e crie de novo pela outra opção do menu.
+### Como saber se criou o dispositivo certo
+
+As duas opções ficam no mesmo menu do `+`, e o agregado não serve aqui: ele distribui
+canais (1-2 para o fone, 3-4 para o BlackHole) em vez de duplicar o áudio, então o
+BlackHole não recebe nada e a transcrição sai vazia, sem erro nenhum.
+
+**Não confira pela coluna `Type` dos Ajustes do Sistema**: ela mostra *Aggregate device*
+para os dois, porque o macOS trata multi-saída como uma variação de agregado.
+
+Confira no **Audio MIDI Setup**, selecionando o dispositivo. O de multi-saída:
+
+* traz a frase *"Devices in this multi-output group will output audio simultaneously"*;
+* tem **Primary Device** no alto e as colunas **Use**, **Volume** e **Drift Correction**;
+* aparece na lista lateral com o ícone de alto-falantes empilhados e um `+`.
+
+O agregado, em vez disso, mostra "Clock Source" e uma coluna "Resample", e não fala em
+*simultaneously*. Se for esse o caso, apague com o `−` e crie de novo pela outra opção.
 
 > Se você usa fone Bluetooth ou USB, ele precisa estar ligado e aparecer na lista para
 > ser marcado. O mais prático é criar **dois** dispositivos de multi-saída — um com o
@@ -188,6 +201,7 @@ Quem quiser o `large-v3` em tempo real no Mac precisa de um motor com Metal
 |---|---|
 | "a trilha 'sistema' está em silêncio absoluto há 10 s" | O terminal não tem permissão de microfone, ou a saída do sistema não está no dispositivo de multi-saída. |
 | BlackHole não aparece em `escriba dispositivos` | O driver não carregou: reinicie o Mac. |
+| Você criou o dispositivo e não sabe se é o certo | Confira no Audio MIDI Setup, não nos Ajustes do Sistema: lá os dois tipos aparecem como "Aggregate device". |
 | Você para de ouvir a reunião | A saída do sistema está no BlackHole puro, não no dispositivo de multi-saída. |
 | Só a sua voz aparece na transcrição | O aplicativo da reunião está mandando o som para um dispositivo específico, por fora do multi-saída. |
 | O som do fone Bluetooth fica abafado | O fone entrou em modo mãos-livres porque o microfone dele está selecionado. Troque a entrada para o microfone do Mac. |
