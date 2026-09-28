@@ -73,6 +73,20 @@ BlackHole não recebe nada. Apague-o com o `−` e crie de novo pela outra opç�
 > Em fone Bluetooth, marque a *Correção de deriva* nele: o relógio do Bluetooth é o que
 > mais desliza.
 
+### Duas armadilhas com fone Bluetooth
+
+**Não use o microfone do fone.** Em **Ajustes do Sistema → Som → Entrada**, escolha o
+microfone do Mac. Quando o macOS usa o microfone de um fone Bluetooth, o aparelho troca
+para o modo mãos-livres (HFP): a qualidade do áudio que sai dele despenca para algo
+entre 8 e 16 kHz, o que estraga a transcrição do que os outros falam. Com o microfone do
+Mac, o fone continua em A2DP e só recebe áudio.
+
+**Aponte a saída do aplicativo da reunião para o dispositivo de multi-saída.** Teams,
+Webex e Meet têm a própria escolha de alto-falante. Se ela estiver num dispositivo
+específico em vez do padrão do sistema, o áudio passa por fora do multi-saída e o
+BlackHole não recebe nada — a transcrição fica só com a sua voz. Escolha ali o mesmo
+dispositivo de multi-saída (ou "igual ao sistema").
+
 > O controle de volume das teclas não funciona em dispositivos de multi-saída. Ajuste o
 > volume pelo próprio aplicativo da reunião, ou no painel do Audio MIDI Setup.
 
@@ -175,5 +189,7 @@ Quem quiser o `large-v3` em tempo real no Mac precisa de um motor com Metal
 | "a trilha 'sistema' está em silêncio absoluto há 10 s" | O terminal não tem permissão de microfone, ou a saída do sistema não está no dispositivo de multi-saída. |
 | BlackHole não aparece em `escriba dispositivos` | O driver não carregou: reinicie o Mac. |
 | Você para de ouvir a reunião | A saída do sistema está no BlackHole puro, não no dispositivo de multi-saída. |
+| Só a sua voz aparece na transcrição | O aplicativo da reunião está mandando o som para um dispositivo específico, por fora do multi-saída. |
+| O som do fone Bluetooth fica abafado | O fone entrou em modo mãos-livres porque o microfone dele está selecionado. Troque a entrada para o microfone do Mac. |
 | Sua voz aparece duplicada nas duas trilhas | Você está em alto-falante: o microfone capta o que sai da caixa. Use fone. |
 | Transcrição atrasa e some texto | O modelo é grande demais para a máquina: desça para `small` e confira o `× tempo real`. |
