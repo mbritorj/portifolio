@@ -59,9 +59,19 @@ reunião**. Para os dois ao mesmo tempo, crie um dispositivo de **multi-saída**
 Depois, em **Ajustes do Sistema → Som → Saída**, escolha esse dispositivo de
 multi-saída. Você continua ouvindo; o Escriba lê do BlackHole.
 
+**Confira na coluna `Type` dessa mesma tela**: precisa dizer *Multi-Output Device*. Se
+disser *Aggregate device*, foi criado o dispositivo errado — o agregado distribui canais
+(1-2 para os alto-falantes, 3-4 para o BlackHole) em vez de duplicar o áudio, e o
+BlackHole não recebe nada. Apague-o com o `−` e crie de novo pela outra opção do menu.
+
 > Se você usa fone Bluetooth ou USB, ele precisa estar ligado e aparecer na lista para
-> ser marcado. Fones que entram e saem o tempo todo dão menos dor de cabeça se você
-> criar um dispositivo de multi-saída para cada situação.
+> ser marcado. O mais prático é criar **dois** dispositivos de multi-saída — um com o
+> fone + BlackHole, outro com os alto-falantes + BlackHole — e trocar em Ajustes do
+> Sistema conforme a situação. Marcar os dois num só faz o som sair nos alto-falantes
+> junto com o fone, o que o microfone capta de volta.
+>
+> Em fone Bluetooth, marque a *Correção de deriva* nele: o relógio do Bluetooth é o que
+> mais desliza.
 
 > O controle de volume das teclas não funciona em dispositivos de multi-saída. Ajuste o
 > volume pelo próprio aplicativo da reunião, ou no painel do Audio MIDI Setup.
