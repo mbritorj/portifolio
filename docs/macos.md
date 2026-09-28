@@ -44,14 +44,24 @@ reunião**. Para os dois ao mesmo tempo, crie um dispositivo de **multi-saída**
 "agregado", que serve para juntar entradas):
 
 1. Abra **Configuração de Áudio e MIDI** (`/Aplicativos/Utilitários/Audio MIDI Setup`).
-2. Clique no **+** no canto inferior esquerdo → **Criar dispositivo de multi-saída**.
-3. Marque **BlackHole 2ch** e a sua saída normal (alto-falantes ou fone).
-4. Na coluna *Correção de deriva* (drift correction), marque a **sua saída**, não o
-   BlackHole.
-5. Renomeie para algo reconhecível, como "Reunião + gravação".
+2. Clique no **+** — o primeiro dos três botões no canto inferior esquerdo, à esquerda
+   do `−` e da engrenagem. A engrenagem **não** serve para isso.
+3. Escolha **Criar dispositivo de multi-saída** (em inglês: *Create Multi-Output
+   Device*).
+4. No painel da direita, marque a coluna **Usar** (*Use*) em duas linhas: **BlackHole
+   2ch** e a sua saída normal (*MacBook Air Speakers*, ou o seu fone).
+5. Deixe o **BlackHole 2ch** como dispositivo principal (*Primary/Master Device*, no
+   alto do painel) e marque **Correção de deriva** (*Drift Correction*) na **sua
+   saída** — não no BlackHole. Se o som ficar picotado, inverta a marcação.
+6. Renomeie: clique duas vezes no nome do novo dispositivo, na lista da esquerda, e
+   escreva algo reconhecível, como "Reunião + gravação".
 
 Depois, em **Ajustes do Sistema → Som → Saída**, escolha esse dispositivo de
 multi-saída. Você continua ouvindo; o Escriba lê do BlackHole.
+
+> Se você usa fone Bluetooth ou USB, ele precisa estar ligado e aparecer na lista para
+> ser marcado. Fones que entram e saem o tempo todo dão menos dor de cabeça se você
+> criar um dispositivo de multi-saída para cada situação.
 
 > O controle de volume das teclas não funciona em dispositivos de multi-saída. Ajuste o
 > volume pelo próprio aplicativo da reunião, ou no painel do Audio MIDI Setup.
