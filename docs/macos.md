@@ -207,3 +207,4 @@ Quem quiser o `large-v3` em tempo real no Mac precisa de um motor com Metal
 | O som do fone Bluetooth fica abafado | O fone entrou em modo mãos-livres porque o microfone dele está selecionado. Troque a entrada para o microfone do Mac. |
 | Sua voz aparece duplicada nas duas trilhas | Você está em alto-falante: o microfone capta o que sai da caixa. Use fone. |
 | Transcrição atrasa e some texto | O modelo é grande demais para a máquina: desça para `small` e confira o `× tempo real`. |
+| Aviso "You are sending unauthenticated requests to the HF Hub" | Normal, e sinal de que o download do modelo começou. É só o limite de taxa do Hugging Face para quem baixa sem conta; não precisa de `HF_TOKEN`. |
