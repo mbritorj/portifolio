@@ -23,6 +23,10 @@ class AudioSource(ABC):
     """Fonte de áudio que entrega blocos mono float32 em ``target_rate``."""
 
     name: str = "audio"
+    #: True quando os blocos chegam na velocidade em que o som acontece. O
+    #: pipeline usa isto para escolher o relógio: ao vivo, o de parede, que não
+    #: acumula deriva entre placas; em arquivo, o do próprio áudio, exato.
+    tempo_real: bool = True
 
     @abstractmethod
     def blocks(self) -> Iterator[np.ndarray]:
@@ -191,6 +195,7 @@ class WavFileSource(AudioSource):
         self.target_rate = target_rate
         self.block_ms = block_ms
         self.realtime = realtime
+        self.tempo_real = realtime
         self._stop = threading.Event()
 
     def blocks(self) -> Iterator[np.ndarray]:

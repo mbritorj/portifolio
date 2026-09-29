@@ -8,9 +8,22 @@ from dataclasses import dataclass, field, fields, is_dataclass
 from pathlib import Path
 from typing import Any
 
-# Vocabulário que costuma aparecer em reuniões corporativas brasileiras. O Whisper
-# usa isso como contexto inicial e erra menos em siglas e nomes de produto.
-PROMPT_INICIAL_PADRAO = (
+# Vazio de propósito. O Whisper usa o prompt inicial como contexto, mas devolve
+# esse mesmo texto como se fosse fala quando recebe silêncio ou ruído — e uma
+# lista de termos genéricos é a forma que mais vira eco. Numa reunião real de 52
+# minutos, 40% dos trechos do microfone foram o prompt de volta.
+#
+# O prompt rende quando é um glossário do SEU contexto — nomes das pessoas, das
+# empresas e dos produtos da reunião —, porque aí ele corrige justamente o que o
+# modelo mais erra. Preencha por reunião, no escriba.toml:
+#
+#     [asr]
+#     initial_prompt = "Albino, Patrícia Igreja, Yves, Q13, Nokia, Taesa, Logicalis."
+PROMPT_INICIAL_PADRAO = ""
+
+# Mantido para o filtro de alucinação reconhecer o eco de quem já gravou com o
+# padrão antigo, e para o teste que reproduz aquela reunião.
+PROMPT_GENERICO_ANTIGO = (
     "Reunião corporativa em português do Brasil. Termos frequentes: SLA, TR, "
     "edital, licitação, pregão, backlog, sprint, deploy, firewall, switch, "
     "roteador, datacenter, nuvem, contrato, escopo, cronograma, entrega."

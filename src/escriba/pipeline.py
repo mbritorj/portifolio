@@ -22,6 +22,7 @@ from typing import Any
 import numpy as np
 
 from .asr import Transcriber, create_transcriber
+from .asr.filtros import avaliar
 from .audio.capture import AudioSource
 from .audio.vad import EnergyVad
 from .config import AppConfig
@@ -51,6 +52,7 @@ class _Job:
     audio: np.ndarray = field(compare=False, default=None)
     start_s: float = field(compare=False, default=0.0)
     end_s: float = field(compare=False, default=0.0)
+    voiced_s: float = field(compare=False, default=0.0)
     parar: bool = field(compare=False, default=False)
 
 
@@ -68,6 +70,7 @@ class PipelineStats:
     parciais: int = 0
     parciais_descartadas: int = 0
     overflows: int = 0
+    alucinacoes: int = 0
     tempo_inferencia_s: float = 0.0
     audio_transcrito_s: float = 0.0
     falantes: int = 0
@@ -255,7 +258,6 @@ class TranscriptionPipeline:
 
     def _loop_captura(self, track: Track) -> None:
         vad = EnergyVad(self.config.vad, self.config.audio.sample_rate, self.config.audio.block_ms)
-        offset = None
         ultima_parcial = 0.0
         intervalo = self.config.asr.partial_interval_s
         minimo = self.config.asr.partial_min_audio_s
@@ -271,10 +273,6 @@ class TranscriptionPipeline:
             for bloco in track.source.blocks():
                 if self._parada.is_set():
                     break
-                if offset is None:
-                    # Diferença entre o início do pipeline e o primeiro bloco desta
-                    # trilha; sem isso as duas trilhas ficam em relógios distintos.
-                    offset = time.monotonic() - self._t0
                 self.stats.blocos += 1
 
                 if not avisou_mudo:
@@ -294,19 +292,26 @@ class TranscriptionPipeline:
                             }
                         )
 
-                for utterance in vad.process(bloco):
-                    self._enfileirar_final(track, utterance, offset)
-
                 agora = time.monotonic()
+                relogio = agora - self._t0
+                for utterance in vad.process(bloco):
+                    self._enfileirar_final(track, utterance, relogio, vad)
+
                 if agora - ultima_parcial >= intervalo:
                     ultima_parcial = agora
                     audio = vad.current_audio
-                    if audio.size / self.config.audio.sample_rate >= minimo:
-                        self._enfileirar_parcial(track, audio, vad.current_start_s + offset)
+                    duracao = audio.size / self.config.audio.sample_rate
+                    if duracao >= minimo:
+                        inicio = (
+                            max(0.0, relogio - duracao)
+                            if track.source.tempo_real
+                            else vad.current_start_s
+                        )
+                        self._enfileirar_parcial(track, audio, inicio)
 
             restante = vad.flush()
             if restante is not None:
-                self._enfileirar_final(track, restante, offset or 0.0)
+                self._enfileirar_final(track, restante, time.monotonic() - self._t0, vad)
         except Exception as exc:  # a captura não pode derrubar o processo todo
             logger.exception("falha na captura da trilha %s", track.name)
             self._emit({"type": "error", "track": track.name, "message": str(exc)})
@@ -315,7 +320,21 @@ class TranscriptionPipeline:
             self.stats.overflows += overflows
             self._emit({"type": "status", "state": "track_finished", "track": track.name})
 
-    def _enfileirar_final(self, track: Track, utterance, offset: float) -> None:
+    def _enfileirar_final(
+        self, track: Track, utterance, relogio: float, vad: EnergyVad
+    ) -> None:
+        """Enfileira uma fala fechada, datada pelo relógio adequado à fonte.
+
+        Ao vivo, o relógio de parede. Datar pelo relógio de áudio de cada trilha
+        parecia natural, mas as duas placas contam o tempo com cristais
+        diferentes: em uma reunião de uma hora, microfone e loopback se afastam
+        dezenas de segundos e a transcrição sai fora de ordem.
+
+        Em arquivo, o relógio do próprio áudio: os blocos chegam mais rápido que
+        o tempo real, então o relógio de parede amontoaria tudo no mesmo
+        instante — e ali não há duas placas para derivar.
+        """
+        inicio, fim = self._datar(utterance, relogio, vad, track)
         self._fila.put(
             _Job(
                 prioridade=PRIORIDADE_FINAL,
@@ -323,10 +342,20 @@ class TranscriptionPipeline:
                 track=track.name,
                 label=track.label,
                 audio=utterance.audio,
-                start_s=utterance.start_s + offset,
-                end_s=utterance.end_s + offset,
+                start_s=inicio,
+                end_s=fim,
+                voiced_s=utterance.voiced_s,
             )
         )
+
+    def _datar(
+        self, utterance, relogio: float, vad: EnergyVad, track: Track
+    ) -> tuple[float, float]:
+        if not track.source.tempo_real:
+            return utterance.start_s, utterance.end_s
+        atraso = max(0.0, vad.elapsed_s - utterance.end_s)
+        fim = max(0.0, relogio - atraso)
+        return max(0.0, fim - (utterance.end_s - utterance.start_s)), fim
 
     def _enfileirar_parcial(self, track: Track, audio: np.ndarray, start_s: float) -> None:
         seq = next(self._seq)
@@ -377,6 +406,21 @@ class TranscriptionPipeline:
 
         self.stats.tempo_inferencia_s += decorrido
         self.stats.audio_transcrito_s += job.audio.size / self.config.audio.sample_rate
+
+        # O Whisper não devolve vazio sobre silêncio: ele inventa, e o que
+        # inventa com mais frequência é o próprio prompt de contexto.
+        veredito = avaliar(resultado.text, initial_prompt=self.config.asr.initial_prompt)
+        if veredito.descartar:
+            self.stats.alucinacoes += 1
+            logger.debug("trecho descartado (%s): %r", veredito.motivo, resultado.text)
+            if not parcial:
+                self.session.clear_partial(job.track)
+            self._emit({"type": "partial", "track": job.track, "speaker": job.label,
+                        "start_s": job.start_s, "text": ""})
+            return
+        if veredito.recortado:
+            self.stats.alucinacoes += 1
+        resultado.text = veredito.texto
 
         if parcial:
             self.stats.parciais += 1
@@ -431,7 +475,10 @@ class TranscriptionPipeline:
             # O microfone não precisa de diarização: é sempre a mesma pessoa.
             return None, job.label, False
 
-        duracao = job.audio.size / self.config.audio.sample_rate
+        # A voz efetiva, e não o tamanho do áudio: o trecho carrega 300 ms de
+        # pré-roll e 700 ms de hangover, então medir o áudio fazia esta guarda
+        # nunca disparar — e cada "uhum" virava um participante novo.
+        duracao = job.voiced_s or job.audio.size / self.config.audio.sample_rate
         if duracao < self.config.diarizacao.min_audio_s:
             # "Sim", "uhum", "certo": curto demais para um vetor confiável.
             # Herdar quem acabou de falar erra menos do que inventar um falante.

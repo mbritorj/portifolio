@@ -29,6 +29,11 @@ device = "auto"        # auto | cuda | cpu
 compute_type = "auto"  # auto | float16 | int8_float16 | int8
 language = "pt"
 partial_interval_s = 1.2
+# Glossário da reunião: nomes de pessoas, empresas e produtos que vão aparecer.
+# É o ajuste mais barato de todos — corrige justamente o que o modelo mais erra.
+# Deixe vazio quando não souber: uma lista de termos genéricos não ajuda e ainda
+# volta como texto alucinado sobre os trechos de silêncio.
+# initial_prompt = "Albino, Patrícia Igreja, Yves, Q13, Nokia, Taesa, Logicalis, FiberSense."
 
 [diarizacao]
 # Separa as vozes dos participantes remotos ("Falante 1", "Falante 2"...).

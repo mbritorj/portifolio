@@ -28,6 +28,10 @@ class Utterance:
     audio: np.ndarray
     start_s: float
     end_s: float
+    # Duração só da voz, sem o pré-roll nem o hangover. É esta que diz se a
+    # fala é longa o bastante para render um vetor de voz confiável — o
+    # tamanho do áudio inclui mais de um segundo de bordas.
+    voiced_s: float = 0.0
     # True quando a fala foi cortada por ``max_utterance_ms`` e continua no
     # próximo trecho; o pipeline usa isso para não fechar o parágrafo.
     truncated: bool = False
@@ -230,4 +234,7 @@ class EnergyVad:
         # somam mais de um segundo e deixariam qualquer estalo passar.
         if voiced_ms < self.config.min_utterance_ms:
             return None
-        return Utterance(audio=audio, start_s=start, end_s=end, truncated=truncated)
+        return Utterance(
+            audio=audio, start_s=start, end_s=end,
+            voiced_s=voiced_ms / 1000, truncated=truncated,
+        )

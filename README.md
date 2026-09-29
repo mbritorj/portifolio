@@ -315,8 +315,11 @@ Os três ajustes que mais mudam o resultado:
   real numa CPU comum. Comece pelo `small`, suba se a máquina aguentar.
 * **`vad.speech_margin_db`** — aumente se o ruído da sala estiver abrindo falas
   fantasma; diminua se falas baixas estiverem passando batido.
-* **`asr.initial_prompt`** — a lista de termos que o modelo tende a acertar. Coloque as
-  siglas, nomes de produto e jargão do seu contexto; é o ajuste mais barato de todos.
+* **`asr.initial_prompt`** — o glossário da reunião: nomes das pessoas, das empresas e
+  dos produtos que vão aparecer. É o ajuste mais barato de todos, porque corrige
+  justamente o que o modelo mais erra. Vem vazio de propósito: uma lista de termos
+  genéricos não ajuda e ainda volta como texto inventado sobre os trechos de silêncio
+  (veja abaixo).
 
 ### Desempenho
 
@@ -359,6 +362,16 @@ Quatro decisões explicam o resto do código:
 4. **`condition_on_previous_text=False`.** Realimentar o texto anterior é a origem
    clássica dos loops de repetição do Whisper, e em reunião com várias vozes o efeito é
    pior ainda.
+5. **Filtro de alucinação na saída.** Sobre silêncio, o Whisper não devolve vazio: ele
+   inventa, e o que inventa com mais frequência é o próprio prompt de contexto. O filtro
+   **recorta** o eco e as frases-fantasma ("Legendas por…") em vez de descartar o trecho,
+   porque a invenção costuma vir colada em fala verdadeira. Numa reunião real de 52
+   minutos, isso limpou 21 trechos inteiros e recortou outros 4, sem perder fala.
+6. **Relógio de parede ao vivo, relógio do áudio em arquivo.** Microfone e loopback são
+   placas diferentes, com cristais diferentes: datar pelo áudio de cada trilha acumula
+   dezenas de segundos de defasagem em uma hora de reunião, e a transcrição sai fora de
+   ordem. Já um arquivo é lido mais rápido que o tempo real, e ali o relógio de parede
+   amontoaria tudo no mesmo instante.
 
 Detalhamento em [`docs/arquitetura.md`](docs/arquitetura.md).
 

@@ -199,8 +199,15 @@ class Session:
 
     @property
     def segments(self) -> list[Segment]:
+        """Trechos em ordem cronológica.
+
+        A ordem de chegada não serve: os trechos são gravados quando a
+        transcrição termina, e um trecho longo demora mais no modelo do que um
+        curto que veio depois. Sem esta ordenação, a transcrição sai com saltos
+        para trás — e uma ata montada sobre ela inverte causa e consequência.
+        """
         with self._lock:
-            return list(self._segments)
+            return sorted(self._segments, key=lambda s: (s.start_s, s.id))
 
     @property
     def partials(self) -> list[dict[str, Any]]:

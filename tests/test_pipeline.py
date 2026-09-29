@@ -398,3 +398,90 @@ def test_audio_com_ruido_nao_dispara_o_aviso_de_mudo(gerar_audio, escrever_wav):
     pipeline.run_until_complete()
 
     assert not [e for e in eventos if e["type"] == "error"]
+
+
+# ------------------------------------------- alucinação, relógio e voz efetiva
+
+
+def test_eco_do_prompt_nao_vira_trecho(gerar_audio, escrever_wav):
+    """O modelo devolvendo o prompt sobre silêncio não pode entrar na ata."""
+    from escriba.config import PROMPT_GENERICO_ANTIGO
+
+    fala, silencio = gerar_audio
+    caminho = escrever_wav(np.concatenate([silencio(0.8), fala(2.0), silencio(1.2)]))
+
+    class MotorQueEcoa(MockTranscriber):
+        def transcribe(self, audio, *, partial=False):
+            return TranscriptionResult(text=PROMPT_GENERICO_ANTIGO)
+
+    config = montar_config()
+    config.asr.initial_prompt = PROMPT_GENERICO_ANTIGO
+    pipeline = TranscriptionPipeline(config, transcriber=MotorQueEcoa(config.asr))
+    pipeline.add_track("arquivo", "Participantes", WavFileSource(caminho))
+    pipeline.run_until_complete()
+
+    assert pipeline.session.segments == []
+    assert pipeline.stats.alucinacoes >= 1
+
+
+def test_fala_colada_no_eco_preserva_a_fala(gerar_audio, escrever_wav):
+    from escriba.config import PROMPT_GENERICO_ANTIGO
+
+    fala, silencio = gerar_audio
+    caminho = escrever_wav(np.concatenate([silencio(0.8), fala(2.0), silencio(1.2)]))
+
+    class MotorMisturado(MockTranscriber):
+        def transcribe(self, audio, *, partial=False):
+            return TranscriptionResult(
+                text=f"Opa, boa tarde, tá me vendo? {PROMPT_GENERICO_ANTIGO}"
+            )
+
+    config = montar_config()
+    config.asr.initial_prompt = PROMPT_GENERICO_ANTIGO
+    pipeline = TranscriptionPipeline(config, transcriber=MotorMisturado(config.asr))
+    pipeline.add_track("arquivo", "Participantes", WavFileSource(caminho))
+    pipeline.run_until_complete()
+
+    assert [s.text for s in pipeline.session.segments] == ["Opa, boa tarde, tá me vendo?"]
+
+
+def test_fala_curta_de_outro_timbre_ainda_herda_o_falante(gerar_audio, escrever_wav):
+    """A guarda mede a voz efetiva, não o áudio com as bordas.
+
+    Medindo o áudio, o pré-roll e o hangover somavam mais de um segundo e a
+    guarda nunca disparava: cada "uhum" abria um participante novo.
+    """
+    fala, silencio = gerar_audio
+    caminho = escrever_wav(
+        np.concatenate([
+            silencio(0.8), fala(2.5, 150), silencio(1.4), fala(0.5, 320), silencio(1.0),
+        ])
+    )
+    config = montar_config_diarizado()
+    config.vad.min_utterance_ms = 300
+    pipeline = rodar_diarizado(caminho, config=config)
+
+    segmentos = pipeline.session.segments
+    assert len(segmentos) == 2
+    assert segmentos[1].speaker_id == segmentos[0].speaker_id
+    assert len(pipeline.session.speakers) == 1
+
+
+def test_arquivo_usa_o_relogio_do_audio(gerar_audio, escrever_wav):
+    """Fonte de arquivo é lida mais rápido que o tempo real.
+
+    Com o relógio de parede, as falas de uma gravação de dez minutos cairiam
+    todas no mesmo segundo.
+    """
+    fala, silencio = gerar_audio
+    caminho = escrever_wav(
+        np.concatenate([silencio(0.8), fala(2.0), silencio(1.6), fala(2.0), silencio(0.8)])
+    )
+    config = montar_config()
+    pipeline = TranscriptionPipeline(config, transcriber=MockTranscriber(config.asr))
+    pipeline.add_track("arquivo", "Participantes", WavFileSource(caminho))
+    pipeline.run_until_complete()
+
+    primeiro, segundo = pipeline.session.segments
+    assert primeiro.start_s < 2.0          # ancorado no áudio, não em "agora"
+    assert segundo.start_s - primeiro.start_s > 2.0

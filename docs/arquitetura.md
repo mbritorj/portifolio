@@ -121,6 +121,43 @@ combinados por duração, segmentos remapeados. Isso resolve o erro mais comum d
 agrupamento — a mesma pessoa partida em dois grupos — com a ação que a pessoa já
 ia fazer de qualquer jeito.
 
+## O que o modelo inventa
+
+Sobre silêncio ou ruído sem fala, o Whisper não devolve vazio — ele inventa, e as duas
+invenções mais comuns têm assinatura reconhecível: o **eco do `initial_prompt`** e as
+**frases-fantasma** herdadas de legendas ("Legendas por…", "Inscreva-se no canal").
+
+Nenhuma das duas some ajustando o VAD: elas acontecem justamente nos trechos que o VAD
+deixa passar por engano, e um VAD mais rígido cortaria fala de verdade. Por isso o filtro
+(`asr/filtros.py`) age na saída, e com duas decisões que valem registrar:
+
+* **Recorta em vez de descartar.** A alucinação costuma vir colada em fala real — "Opa,
+  boa tarde, tá me vendo?" seguido do prompt inteiro. Jogar o trecho fora levaria junto o
+  que foi dito.
+* **Procura por janelas de três palavras, não por alinhamento.** O eco quase sempre vem
+  repetido, e um alinhamento casaria só a primeira cópia. As bordas flexionadas
+  ("corporativo" por "corporativa") são absorvidas depois, olhando a vizinhança.
+
+O limiar é conservador de propósito: deixar passar uma alucinação é menos grave do que
+descartar fala, porque o texto perdido não volta.
+
+## Dois relógios
+
+Cada trilha tem seu relógio de áudio (blocos consumidos × duração do bloco), mas ele não
+serve para datar ao vivo: microfone e loopback são placas diferentes, com cristais
+diferentes, e em uma reunião de uma hora se afastam dezenas de segundos — a transcrição
+sai com saltos para trás. Ao vivo, cada fala é ancorada no relógio de parede no momento
+em que fecha.
+
+Em arquivo é o contrário: os blocos chegam muito mais rápido que o tempo real, então o
+relógio de parede amontoaria a gravação inteira no mesmo instante. Ali vale o relógio do
+áudio, que é exato e não tem duas placas para derivar. Quem decide é a própria fonte,
+pela propriedade `AudioSource.tempo_real`.
+
+Como os trechos são gravados quando a transcrição termina — e um trecho longo demora mais
+no modelo do que um curto que veio depois —, `Session.segments` ordena por tempo de início
+na leitura. Sem isso, uma ata montada sobre a transcrição inverte causa e consequência.
+
 ## Linha do tempo
 
 Cada trilha tem seu próprio relógio de áudio (blocos consumidos × duração do bloco).

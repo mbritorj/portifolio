@@ -224,3 +224,16 @@ def test_salvar_gera_o_arquivo_do_claude_com_nome_proprio(tmp_path):
     nomes = [c.name for c in caminhos]
     assert any(n.endswith(".claude.md") for n in nomes)
     assert any(n.endswith(".md") and not n.endswith(".claude.md") for n in nomes)
+
+
+def test_trechos_saem_em_ordem_cronologica():
+    """Chegam na ordem em que a transcrição termina; saem na ordem falada."""
+    session = Session("Fora de ordem")
+    session.add_segment(track="sistema", speaker="A", start_s=30, end_s=33, text="terceiro")
+    session.add_segment(track="microfone", speaker="B", start_s=5, end_s=8, text="primeiro")
+    session.add_segment(track="sistema", speaker="A", start_s=12, end_s=15, text="segundo")
+
+    assert [s.text for s in session.segments] == ["primeiro", "segundo", "terceiro"]
+    linhas = [linha for linha in session.to_text().splitlines() if linha.strip()]
+    assert linhas[0].endswith("primeiro") and linhas[-1].endswith("terceiro")
+    assert session.to_claude().index("primeiro") < session.to_claude().index("terceiro")
