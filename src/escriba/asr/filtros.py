@@ -37,6 +37,17 @@ FRASES_FANTASMA = (
     r"at[ée] (?:a )?pr[óo]xima edi[çc][ãa]o[^.!?]*",
 )
 
+# Fórmulas de despedida de vídeo que o Whisper solta sobre silêncio. Ao
+# contrário das de cima, estas aparecem em conversa de verdade ("obrigado,
+# gente, até a próxima"), então só são alucinação quando são o trecho inteiro.
+FRASES_ISOLADAS = (
+    "ate a proxima",
+    "ate a proxima edicao",
+    "ate mais",
+    "muito obrigado pela atencao",
+    "obrigado por assistir",
+)
+
 _FANTASMAS = re.compile("|".join(FRASES_FANTASMA), re.IGNORECASE)
 _NAO_ALFANUM = re.compile(r"[^a-z0-9]+")
 _PALAVRA = re.compile(r"\S+")
@@ -50,10 +61,13 @@ COBERTURA_MINIMA = 0.5
 PALAVRAS_POR_TRECHO = 3
 #: Abaixo disto, o que sobrou depois do recorte não é frase: descarta.
 PALAVRAS_MINIMAS = 3
-#: Variedade de palavras abaixo da qual o trecho é repetição em laço.
+#: Variedade de palavras abaixo da qual um trecho longo é repetição em laço.
 VARIEDADE_MINIMA = 0.35
-#: Repetição só é avaliada em trechos longos: "sim, sim, sim" é fala real.
 PALAVRAS_PARA_AVALIAR_REPETICAO = 12
+#: Trecho curto precisa ser mais monótono para ser condenado: "sim, sim, sim"
+#: e "pode ser, pode ser" são fala real; "uf, uf, uf, uf, uf, uf, uf" não é.
+VARIEDADE_MINIMA_CURTA = 0.25
+PALAVRAS_PARA_AVALIAR_REPETICAO_CURTA = 5
 
 
 @dataclass
@@ -76,6 +90,9 @@ def avaliar(texto: str, *, initial_prompt: str = "") -> Veredito:
     """Decide se o trecho é fala, é invenção, ou é fala com invenção colada."""
     limpo, tirou_fantasma = _remover_fantasmas(texto)
     if not normalizar(limpo):
+        return Veredito(texto="", descartar=True, motivo="frase-fantasma do modelo")
+
+    if _e_despedida_isolada(normalizar(limpo)):
         return Veredito(texto="", descartar=True, motivo="frase-fantasma do modelo")
 
     recortado, cobertura = _remover_eco(limpo, initial_prompt)
@@ -212,8 +229,17 @@ def _arrumar_pontuacao(texto: str) -> str:
     return re.sub(r"\s+([.,;:!?])", r"\1", texto).strip()
 
 
+def _e_despedida_isolada(palavras: list[str]) -> bool:
+    """True quando o trecho inteiro é só uma fórmula de despedida de vídeo."""
+    texto = " ".join(palavras)
+    return any(texto == frase for frase in FRASES_ISOLADAS)
+
+
 def _e_repeticao(palavras: list[str]) -> bool:
     """True para o laço de repetição clássico do Whisper sobre ruído."""
-    if len(palavras) < PALAVRAS_PARA_AVALIAR_REPETICAO:
-        return False
-    return len(set(palavras)) / len(palavras) < VARIEDADE_MINIMA
+    variedade = len(set(palavras)) / len(palavras) if palavras else 1.0
+    if len(palavras) >= PALAVRAS_PARA_AVALIAR_REPETICAO:
+        return variedade < VARIEDADE_MINIMA
+    if len(palavras) >= PALAVRAS_PARA_AVALIAR_REPETICAO_CURTA:
+        return variedade < VARIEDADE_MINIMA_CURTA
+    return False

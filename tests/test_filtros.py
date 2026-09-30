@@ -111,3 +111,37 @@ def test_glossario_de_nomes_nao_derruba_fala():
     glossario = "Albino, Patrícia Igreja, Yves, Q13, Nokia, Taesa, FiberSense, transponder."
     texto = "O Albino vai mandar a última versão para a Patrícia e para o Yves hoje."
     assert avaliar(texto, initial_prompt=glossario).descartar is False
+
+
+# ------------------- vazamentos encontrados na segunda reunião real (9 minutos)
+
+
+@pytest.mark.parametrize(
+    "texto",
+    [
+        "Até a próxima!",
+        "Até a próxima.",
+        "até mais",
+        "Muito obrigado pela atenção.",
+        # O laço curto: sete palavras, uma só de verdade.
+        "Uf, uf, uf, uf, uf, uf, uf.",
+    ],
+)
+def test_sobras_de_alucinacao_da_segunda_reuniao(texto):
+    assert avaliar(texto).descartar is True
+
+
+@pytest.mark.parametrize(
+    "texto",
+    [
+        # Despedida de verdade, no fim de uma fala com conteúdo.
+        "Obrigado, gente. Tchau, obrigado. Até a próxima.",
+        "Obrigado pessoal!",
+        "Sim, sim, sim.",
+        "Tá bom. Tá bom.",
+        "Sim, pode ser, pode ser, pode ser, melhor.",
+        "Não, não, não.",
+    ],
+)
+def test_despedida_e_repeticao_de_gente_continuam_passando(texto):
+    assert avaliar(texto).descartar is False
