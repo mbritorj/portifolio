@@ -216,8 +216,36 @@ class Session:
 
     @property
     def duracao_s(self) -> float:
+        """Tempo de sessão aberta. É o que o cronômetro da tela mostra."""
         fim = self.encerrada_em or datetime.now()
         return (fim - self.iniciada_em).total_seconds()
+
+    @property
+    def duracao_conteudo_s(self) -> float:
+        """Da primeira à última fala — a duração da reunião.
+
+        Não é a mesma coisa que o tempo de sessão aberta: esquecer o Escriba
+        gravando depois que a reunião acabou é comum, e uma reunião de quinze
+        minutos já foi exportada como "18:45:26" porque o encerrar veio no dia
+        seguinte. Quem lê a ata quer a duração da conversa.
+        """
+        trechos = self.segments
+        if not trechos:
+            return 0.0
+        return max(t.end_s for t in trechos) - min(t.start_s for t in trechos)
+
+    def _duracao_linhas(self) -> list[tuple[str, str]]:
+        """Rótulo e valor da duração, com aviso quando a sessão ficou aberta."""
+        linhas = [("Duração", _timestamp(self.duracao_conteudo_s))]
+        if self.segments and self.duracao_s - self.duracao_conteudo_s > 600:
+            linhas.append(
+                (
+                    "Gravação aberta por",
+                    f"{_timestamp(self.duracao_s)} — o encerrar veio bem depois "
+                    "da última fala.",
+                )
+            )
+        return linhas
 
     def snapshot(self) -> dict[str, Any]:
         """Estado completo, para um cliente que acabou de se conectar."""
@@ -273,7 +301,7 @@ class Session:
             f"# {self.titulo}",
             "",
             f"- **Início:** {self.iniciada_em.strftime('%d/%m/%Y %H:%M')}",
-            f"- **Duração:** {_timestamp(self.duracao_s)}",
+            *[f"- **{rotulo}:** {valor}" for rotulo, valor in self._duracao_linhas()],
             f"- **Trechos:** {len(self._segments)}",
             "",
             "## Transcrição",
@@ -321,7 +349,7 @@ class Session:
             f"# Transcrição — {self.titulo}",
             "",
             f"- Data: {self.iniciada_em.strftime('%d/%m/%Y %H:%M')}",
-            f"- Duração: {_timestamp(self.duracao_s)}",
+            *[f"- {rotulo}: {valor}" for rotulo, valor in self._duracao_linhas()],
             f"- Trechos transcritos: {len(self._segments)}",
             "",
             "## Quem falou",

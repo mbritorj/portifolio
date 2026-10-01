@@ -479,11 +479,14 @@ class TranscriptionPipeline:
         # pré-roll e 700 ms de hangover, então medir o áudio fazia esta guarda
         # nunca disparar — e cada "uhum" virava um participante novo.
         duracao = job.voiced_s or job.audio.size / self.config.audio.sample_rate
-        if duracao < self.config.diarizacao.min_audio_s:
+        anterior = self._ultimo_falante.get(job.track)
+        if duracao < self.config.diarizacao.min_audio_s and anterior is not None:
             # "Sim", "uhum", "certo": curto demais para um vetor confiável.
             # Herdar quem acabou de falar erra menos do que inventar um falante.
-            anterior = self._ultimo_falante.get(job.track)
-            return (*anterior, False) if anterior else (None, job.label, False)
+            # Só vale quando há alguém de quem herdar: na primeira fala da
+            # trilha, cair no rótulo genérico deixaria um "Participantes" solto
+            # no meio de uma transcrição que o resto nomeia.
+            return (*anterior, False)
 
         inicio = time.monotonic()
         try:

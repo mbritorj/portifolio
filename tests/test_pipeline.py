@@ -485,3 +485,26 @@ def test_arquivo_usa_o_relogio_do_audio(gerar_audio, escrever_wav):
     primeiro, segundo = pipeline.session.segments
     assert primeiro.start_s < 2.0          # ancorado no áudio, não em "agora"
     assert segundo.start_s - primeiro.start_s > 2.0
+
+
+def test_primeira_fala_curta_da_trilha_ainda_ganha_falante(gerar_audio, escrever_wav):
+    """Sem ninguém de quem herdar, vale calcular o vetor mesmo em fala curta.
+
+    Caindo no rótulo da trilha, a transcrição abria com um "Participantes"
+    solto no meio de um arquivo em que todo o resto tem nome.
+    """
+    fala, silencio = gerar_audio
+    caminho = escrever_wav(
+        np.concatenate([
+            silencio(0.8), fala(0.6, 150), silencio(1.4), fala(2.5, 150), silencio(1.0),
+        ])
+    )
+    config = montar_config_diarizado()
+    config.vad.min_utterance_ms = 300
+    pipeline = rodar_diarizado(caminho, config=config)
+
+    segmentos = pipeline.session.segments
+    assert len(segmentos) == 2
+    assert segmentos[0].speaker_id is not None
+    assert segmentos[0].speaker.startswith("Falante")
+    assert segmentos[1].speaker_id == segmentos[0].speaker_id

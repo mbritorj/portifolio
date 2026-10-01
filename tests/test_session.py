@@ -237,3 +237,38 @@ def test_trechos_saem_em_ordem_cronologica():
     linhas = [linha for linha in session.to_text().splitlines() if linha.strip()]
     assert linhas[0].endswith("primeiro") and linhas[-1].endswith("terceiro")
     assert session.to_claude().index("primeiro") < session.to_claude().index("terceiro")
+
+
+# ----------------------------------------------------- duração da reunião
+
+
+def test_duracao_e_a_da_conversa_nao_a_da_sessao_aberta():
+    """Esquecer o Escriba gravando não pode virar uma reunião de 18 horas."""
+    from datetime import timedelta
+
+    session = Session("Reunião curta, sessão longa")
+    session.iniciada_em = session.iniciada_em.replace(microsecond=0)
+    session.encerrada_em = session.iniciada_em + timedelta(hours=18, minutes=45)
+    session.add_segment(track="sistema", speaker="X", start_s=17, end_s=25, text="oi")
+    session.add_segment(track="sistema", speaker="X", start_s=884, end_s=912, text="tchau")
+
+    assert session.duracao_conteudo_s == pytest.approx(895)
+    cabecalho = session.to_markdown().split("## Transcrição")[0]
+    assert "**Duração:** 00:14:55" in cabecalho
+    assert "Gravação aberta por:** 18:45:00" in cabecalho
+    assert "- Duração: 00:14:55" in session.to_claude()
+
+
+def test_sessao_sem_sobra_nao_ganha_o_aviso():
+    from datetime import timedelta
+
+    session = Session("Reunião normal")
+    session.encerrada_em = session.iniciada_em + timedelta(minutes=16)
+    session.add_segment(track="sistema", speaker="X", start_s=10, end_s=900, text="oi")
+
+    assert "Gravação aberta por" not in session.to_markdown()
+
+
+def test_sem_trechos_a_duracao_nao_quebra():
+    assert Session("Vazia").duracao_conteudo_s == 0.0
+    assert "**Duração:** 00:00:00" in Session("Vazia").to_markdown()
