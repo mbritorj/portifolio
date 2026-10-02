@@ -19,6 +19,7 @@ src/escriba/
 │   ├── clustering.py  agrupamento incremental por cosseno
 │   └── profiles.py    cadastro de vozes (nome ↔ impressão vocal)
 ├── attribution.py     nomes a partir do transcript oficial da plataforma
+├── glossario.py       termos da reunião, editáveis pela própria página
 ├── pipeline.py        threads de captura, fila de inferência, eventos
 ├── session.py         segmentos, hipóteses parciais, exportação
 ├── server.py          FastAPI + WebSocket
@@ -140,6 +141,25 @@ deixa passar por engano, e um VAD mais rígido cortaria fala de verdade. Por iss
 
 O limiar é conservador de propósito: deixar passar uma alucinação é menos grave do que
 descartar fala, porque o texto perdido não volta.
+
+## O glossário
+
+O `initial_prompt` do Whisper só rende quando traz os nomes próprios daquela
+reunião — e por isso muda toda semana. Enquanto ele morava no `escriba.toml`,
+nenhuma das quatro gravações reais teve glossário preenchido: abrir um arquivo de
+configuração antes de cada reunião é atrito suficiente para a pessoa desistir.
+
+Por isso ele virou um painel da própria página, com o valor em
+`~/.config/escriba/glossario.txt`. Três detalhes importam:
+
+* **`AppConfig.load()` lê o arquivo** quando `asr.initial_prompt` está vazio, de
+  modo que o glossário salvo na interface vale também para `escriba gravar` e
+  `escriba arquivo`. Escrever o `initial_prompt` no TOML continua vencendo.
+* **O servidor relê o glossário a cada `iniciar()`**, não na partida: o ajuste
+  acontece entre uma reunião e a seguinte, com o servidor no ar.
+* **O limite de 600 caracteres é checado na gravação, com aviso.** O Whisper
+  ignora em silêncio o que passa do prompt dele; cortar avisando é melhor do que
+  deixar alguém acreditar num glossário que o modelo nunca viu.
 
 ## Dois relógios
 
