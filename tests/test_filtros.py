@@ -145,3 +145,24 @@ def test_sobras_de_alucinacao_da_segunda_reuniao(texto):
 )
 def test_despedida_e_repeticao_de_gente_continuam_passando(texto):
     assert avaliar(texto).descartar is False
+
+
+# ------------------------------- sobra de legenda vista na quarta reunião real
+
+
+def test_org_sozinho_e_descartado():
+    """Resto de 'Legendas pela comunidade Amara.org', solto num trecho só."""
+    assert avaliar("org").descartar is True
+    assert avaliar("Amara.org").descartar is True
+
+
+def test_org_colado_no_fim_da_fala_e_removido():
+    veredito = avaliar("Valeu! Tchau gente! Obrigada! org")
+    assert veredito.descartar is False
+    assert veredito.texto == "Valeu! Tchau gente! Obrigada!"
+
+
+def test_org_no_meio_da_frase_e_preservado():
+    """Pode ser um endereço ditado de verdade."""
+    texto = "Manda para contato arroba q13 ponto org, por favor."
+    assert avaliar(texto).texto == texto

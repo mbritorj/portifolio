@@ -48,6 +48,14 @@ FRASES_ISOLADAS = (
     "obrigado por assistir",
 )
 
+# Resto da legenda "Legendas pela comunidade Amara.org" quando o modelo solta
+# só o finalzinho. Sozinho não quer dizer nada; no fim de uma fala real, é lixo
+# grudado. Só é removido nessas duas posições — "org" no meio de uma frase pode
+# ser um endereço ditado de verdade.
+# Só espaço e travessão antes: o ponto de exclamação que fecha a fala de
+# verdade ("Obrigada! org") tem que ficar.
+_SOBRA_AMARA = re.compile(r"[\s–—-]*\b(?:amara\s*\.?\s*)?org\s*$", re.IGNORECASE)
+
 _FANTASMAS = re.compile("|".join(FRASES_FANTASMA), re.IGNORECASE)
 _NAO_ALFANUM = re.compile(r"[^a-z0-9]+")
 _PALAVRA = re.compile(r"\S+")
@@ -117,7 +125,7 @@ def _normalizar_palavra(palavra: str) -> str:
 
 
 def _remover_fantasmas(texto: str) -> tuple[str, bool]:
-    limpo = _FANTASMAS.sub(" ", texto)
+    limpo = _SOBRA_AMARA.sub("", _FANTASMAS.sub(" ", texto))
     if limpo == texto:
         return texto.strip(), False
     return _arrumar_pontuacao(limpo), True
