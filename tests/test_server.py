@@ -17,6 +17,8 @@ def cliente(tmp_path):
     config.asr.engine = "mock"
     config.output_dir = tmp_path
     config.vozes.store = str(tmp_path / "vozes.json")
+    monkeypatch_glossario = tmp_path / "glossario.txt"
+    config.caminho_glossario = lambda: monkeypatch_glossario
     app = criar_app(config)
     with TestClient(app) as cliente:
         cliente.app_state = app.state.escriba
@@ -212,3 +214,52 @@ def test_encerrar_salva_tambem_o_arquivo_do_claude(cliente):
 
     assert any(a.endswith(".claude.md") for a in arquivos)
     assert any(a.endswith(".json") for a in arquivos)
+
+
+# ------------------------------------------------------------------ glossário
+
+
+def test_glossario_comeca_vazio(cliente):
+    dados = cliente.get("/api/glossario").json()
+    assert dados == {"texto": "", "termos": 0, "limite": 600}
+
+
+def test_glossario_salva_e_relê(cliente):
+    resposta = cliente.put("/api/glossario", json={"texto": " Nokia, Taesa,  Albino \n"})
+    assert resposta.status_code == 200
+    assert resposta.json()["texto"] == "Nokia, Taesa, Albino"
+    assert resposta.json()["termos"] == 3
+
+    assert cliente.get("/api/glossario").json()["texto"] == "Nokia, Taesa, Albino"
+
+
+def test_glossario_longo_demais_e_cortado_com_aviso(cliente):
+    dados = cliente.put("/api/glossario", json={"texto": "Nutanix, " * 200}).json()
+    assert len(dados["texto"]) <= 600
+    assert "cortado" in dados["aviso"]
+
+
+def test_glossario_vazio_apaga_o_anterior(cliente):
+    cliente.put("/api/glossario", json={"texto": "Nokia"})
+    assert cliente.put("/api/glossario", json={"texto": "   "}).json()["texto"] == ""
+    assert cliente.get("/api/glossario").json()["texto"] == ""
+
+
+def test_glossario_entra_na_gravacao(cliente):
+    """O que a página salvou é o que o modelo recebe como contexto."""
+    cliente.put("/api/glossario", json={"texto": "Nokia, Taesa, FiberSense"})
+    estado = cliente.app_state
+    estado.config.asr.initial_prompt = "sobra de outra reunião"
+
+    try:
+        estado.iniciar("Teste")
+    except Exception:
+        pass  # sem placa de áudio aqui; o que importa é o prompt já ter sido lido
+
+    assert estado.config.asr.initial_prompt == "Nokia, Taesa, FiberSense"
+
+
+def test_pagina_traz_o_painel_do_glossario(cliente):
+    pagina = cliente.get("/").text
+    assert "Glossário da reunião" in pagina
+    assert 'id="textoGlossario"' in pagina

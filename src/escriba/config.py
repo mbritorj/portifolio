@@ -169,7 +169,17 @@ class AppConfig:
             with open(toml_path, "rb") as handle:
                 _apply_mapping(config, tomllib.load(handle))
         _apply_env(config)
+        # O glossário salvo pela interface vale para a linha de comando também,
+        # mas nunca por cima de um initial_prompt escrito à mão no TOML.
+        if not config.asr.initial_prompt:
+            from .glossario import ler
+
+            config.asr.initial_prompt = ler(config.caminho_glossario())
         return config
+
+    def caminho_glossario(self) -> Path:
+        """Onde fica o glossário editado pela interface."""
+        return _diretorio_de_config() / "glossario.txt"
 
     def caminho_vozes(self) -> Path:
         """Onde fica o cadastro de vozes.

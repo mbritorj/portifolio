@@ -48,6 +48,28 @@
   .pulso { width: 9px; height: 9px; border-radius: 50%; background: var(--suave); display: inline-block; }
   .pulso.ativo { background: var(--alerta); animation: pisca 1.6s ease-in-out infinite; }
   @keyframes pisca { 50% { opacity: .25; } }
+  details.glossario {
+    margin: 0 0 18px; padding: 10px 14px; background: var(--painel);
+    border: 1px solid var(--borda); border-radius: 10px;
+  }
+  details.glossario summary {
+    cursor: pointer; font-size: 13px; color: var(--suave); list-style: none;
+  }
+  details.glossario summary::-webkit-details-marker { display: none; }
+  details.glossario summary::before { content: "▸ "; }
+  details.glossario[open] summary::before { content: "▾ "; }
+  details.glossario summary strong { color: var(--texto); font-weight: 600; }
+  details.glossario .corpo { padding-top: 10px; }
+  details.glossario p { margin: 0 0 8px; font-size: 13px; color: var(--suave); }
+  details.glossario textarea {
+    width: 100%; padding: 10px; border-radius: 8px; border: 1px solid var(--borda);
+    background: var(--fundo); color: var(--texto); resize: vertical;
+    font: 13px/1.5 ui-sans-serif, system-ui, sans-serif;
+  }
+  details.glossario .rodape {
+    display: flex; gap: 10px; align-items: center; margin-top: 8px;
+    font-size: 12px; color: var(--suave);
+  }
   .falantes { display: flex; gap: 8px; flex-wrap: wrap; margin: 0 0 18px; }
   .chip {
     display: inline-flex; align-items: center; gap: 7px; padding: 5px 10px;
@@ -114,6 +136,23 @@
     <span id="desempenho"></span>
     <span id="mensagem" class="erro"></span>
   </div>
+
+  <details class="glossario" id="glossario">
+    <summary><strong>Glossário da reunião</strong> <span id="resumoGlossario"></span></summary>
+    <div class="corpo">
+      <p>
+        Nomes de pessoas, empresas e produtos que vão aparecer. É o que o
+        reconhecimento mais erra — e o que mais atrapalha a ata depois. Vale para
+        a próxima gravação que você iniciar.
+      </p>
+      <textarea id="textoGlossario" rows="3" spellcheck="false"
+        placeholder="Nokia, Taesa, Albino, Patrícia Igreja, Yves, Q13, FiberSense, transponder, Dark Fiber."></textarea>
+      <div class="rodape">
+        <button id="salvarGlossario" class="primario">Salvar</button>
+        <span id="estadoGlossario"></span>
+      </div>
+    </div>
+  </details>
 
   <div class="falantes" id="falantes"></div>
 
@@ -349,6 +388,63 @@ function pararConsulta() {
   $("mensagem").textContent = "";
 }
 
+// --------------------------------------------------------------- glossário
+
+let glossarioSalvo = "";
+
+function resumirGlossario(termos) {
+  const alvo = $("resumoGlossario");
+  if (!termos) {
+    alvo.textContent = "— vazio; nomes próprios vão sair errados";
+    return;
+  }
+  alvo.textContent = `— ${termos} ${termos === 1 ? "termo" : "termos"}`;
+}
+
+async function carregarGlossario() {
+  try {
+    const dados = await (await fetch("/api/glossario")).json();
+    glossarioSalvo = dados.texto || "";
+    $("textoGlossario").value = glossarioSalvo;
+    $("textoGlossario").maxLength = dados.limite;
+    resumirGlossario(dados.termos);
+    // Sem glossário, o painel abre sozinho: é o ajuste de maior retorno e o
+    // mais fácil de esquecer.
+    if (!glossarioSalvo) $("glossario").open = true;
+  } catch (erro) {
+    $("estadoGlossario").textContent = erro.message;
+  }
+}
+
+async function salvarGlossario() {
+  const botao = $("salvarGlossario");
+  botao.disabled = true;
+  try {
+    const resposta = await fetch("/api/glossario", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ texto: $("textoGlossario").value }),
+    });
+    const dados = await resposta.json();
+    if (!resposta.ok) throw new Error(dados.detail || resposta.statusText);
+    glossarioSalvo = dados.texto;
+    $("textoGlossario").value = dados.texto;
+    resumirGlossario(dados.termos);
+    $("estadoGlossario").textContent = dados.aviso || "salvo";
+    if (!dados.aviso) setTimeout(() => ($("estadoGlossario").textContent = ""), 2500);
+  } catch (erro) {
+    $("estadoGlossario").textContent = erro.message;
+  } finally {
+    botao.disabled = false;
+  }
+}
+
+$("salvarGlossario").onclick = salvarGlossario;
+$("textoGlossario").oninput = () => {
+  const mudou = $("textoGlossario").value.trim() !== glossarioSalvo;
+  $("estadoGlossario").textContent = mudou ? "não salvo" : "";
+};
+
 function conectar() {
   const ws = new WebSocket(`ws://${location.host}/ws`);
   ws.onopen = pararConsulta;
@@ -410,7 +506,12 @@ $("iniciar").onclick = async () => {
     desenharFalantes([]);
     $("ata").hidden = true;
     $("pedido").hidden = true;
-    await chamar("/api/iniciar", { titulo: $("titulo").value.trim() || null });
+    const dados = await chamar("/api/iniciar", { titulo: $("titulo").value.trim() || null });
+    $("glossario").open = false;
+    const termos = dados.termos_no_glossario;
+    $("mensagem").textContent = termos
+      ? `glossário com ${termos} ${termos === 1 ? "termo" : "termos"} em uso`
+      : "sem glossário: nomes próprios vão sair errados";
   } catch (erro) {
     $("mensagem").textContent = erro.message;
     definirEstado("parado", false);
@@ -495,6 +596,7 @@ setInterval(() => {
   if (gravando && inicioMs) $("duracao").textContent = hhmmss((Date.now() - inicioMs) / 1000);
 }, 1000);
 
+carregarGlossario();
 conectar();
 </script>
 </body>

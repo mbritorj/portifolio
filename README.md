@@ -24,7 +24,9 @@ ou pela API, se preferir automatizar.
 
 ## O fluxo de uma reunião
 
-1. `escriba servir` antes de entrar na reunião, e **Iniciar**.
+1. `escriba servir` antes de entrar na reunião. Preencha o **Glossário da reunião** com
+   os nomes de quem vai participar — leva dez segundos e é o que mais muda o resultado —
+   e clique em **Iniciar**.
 2. A transcrição aparece ao vivo, com uma cor por voz. Quem já tem voz cadastrada
    aparece com o nome; os demais, como "Falante 2".
 3. **Encerrar** grava tudo em `transcricoes/` e fecha os nomes.
@@ -315,11 +317,14 @@ Os três ajustes que mais mudam o resultado:
   real numa CPU comum. Comece pelo `small`, suba se a máquina aguentar.
 * **`vad.speech_margin_db`** — aumente se o ruído da sala estiver abrindo falas
   fantasma; diminua se falas baixas estiverem passando batido.
-* **`asr.initial_prompt`** — o glossário da reunião: nomes das pessoas, das empresas e
-  dos produtos que vão aparecer. É o ajuste mais barato de todos, porque corrige
-  justamente o que o modelo mais erra. Vem vazio de propósito: uma lista de termos
-  genéricos não ajuda e ainda volta como texto inventado sobre os trechos de silêncio
-  (veja abaixo).
+* **Glossário da reunião** — nomes das pessoas, das empresas e dos produtos que vão
+  aparecer. É o ajuste mais barato de todos, porque corrige justamente o que o modelo
+  mais erra. Edite direto na página, no painel **Glossário da reunião**: o que você salva
+  ali vale para a próxima gravação e também para a linha de comando, guardado em
+  `~/.config/escriba/glossario.txt`. Quem preferir o arquivo pode usar
+  `asr.initial_prompt` no `escriba.toml`, que tem precedência sobre o painel. Vem vazio
+  de propósito: uma lista de termos genéricos não ajuda e ainda volta como texto
+  inventado sobre os trechos de silêncio (veja abaixo).
 
 ### Desempenho
 

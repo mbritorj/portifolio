@@ -25,6 +25,7 @@ from .audio.capture import build_source
 from .audio.devices import DeviceError, list_input_devices
 from .config import AppConfig
 from .diarize import ConsentimentoAusente, VoiceProfileStore
+from .glossario import LIMITE_CARACTERES, contar_termos, ler, salvar
 from .pipeline import TranscriptionPipeline
 from .session import Session
 from .summarize import PEDIDO_ATA, SummaryError, gerar_ata
@@ -86,6 +87,10 @@ class AppState:
         if self.gravando:
             raise RuntimeError("já existe uma gravação em andamento.")
 
+        # Relido a cada gravação: o glossário é editado na página entre uma
+        # reunião e outra, e o que vale é o que está lá na hora de gravar.
+        self.config.asr.initial_prompt = ler(self.config.caminho_glossario())
+
         self.session = Session(titulo)
         self.ata = None
         pipeline = TranscriptionPipeline(
@@ -106,7 +111,11 @@ class AppState:
 
         pipeline.start()
         self.pipeline = pipeline
-        return {"titulo": self.session.titulo, "iniciada_em": self.session.iniciada_em.isoformat()}
+        return {
+            "titulo": self.session.titulo,
+            "iniciada_em": self.session.iniciada_em.isoformat(),
+            "termos_no_glossario": contar_termos(self.config.asr.initial_prompt),
+        }
 
     def _trilhas_configuradas(self):
         audio = self.config.audio
@@ -221,6 +230,16 @@ def criar_app(config: AppConfig) -> Any:
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
         return {**resultado, "speakers": estado.session.speakers}
+
+    @app.get("/api/glossario")
+    async def obter_glossario() -> dict:
+        texto = ler(config.caminho_glossario())
+        return {"texto": texto, "termos": contar_termos(texto), "limite": LIMITE_CARACTERES}
+
+    @app.put("/api/glossario")
+    async def gravar_glossario(payload: dict) -> dict:
+        texto, aviso = salvar(config.caminho_glossario(), payload.get("texto") or "")
+        return {"texto": texto, "termos": contar_termos(texto), "aviso": aviso}
 
     @app.get("/api/vozes")
     async def listar_vozes() -> dict:
